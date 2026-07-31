@@ -42,7 +42,7 @@ export default function App() {
             colorInfo: "#0f766e",
             colorSuccess: "#16a34a",
             colorWarning: "#d97706",
-            colorBgLayout: "#f4f7f6",
+            colorBgLayout: "#f6f7f3",
             colorText: "#1e293b",
             colorTextSecondary: "#64748b",
             colorTextPlaceholder: "#64748b",
@@ -66,7 +66,7 @@ export default function App() {
           <AppErrorBoundary>
             <AuthProvider>
               <ScrollToTop />
-              <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f4f7f6]" aria-live="polite"><Spin size="large" tip="正在进入课程空间…"><div className="h-16 w-52" /></Spin></div>}>
+              <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f6f7f3]" aria-live="polite"><Spin size="large" tip="正在进入课程空间…"><div className="h-16 w-52" /></Spin></div>}>
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/dashboard" element={protectedPage(<Dashboard />)} />

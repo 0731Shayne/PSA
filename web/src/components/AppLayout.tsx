@@ -5,6 +5,7 @@ import { BookOutlined, CheckSquareOutlined, ExperimentOutlined, HomeOutlined, Lo
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { resetDemoData } from "@/demo/demoApi";
+import { BrandMark } from "@/components/BrandMark";
 
 const items = [
   { path: "/dashboard", label: "学习工作台", shortLabel: "工作台", icon: <HomeOutlined /> },
@@ -61,7 +62,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const brand = (
     <button onClick={() => navigate("/dashboard")} className="brand-button" aria-label="返回学习工作台">
-      <span className="brand-mark">π</span>
+      <BrandMark />
       <span className="min-w-0 text-left">
         <span className="block truncate text-base font-bold tracking-tight text-slate-900">概率统计教学助手</span>
         <span className="block text-sm font-semibold text-slate-500">概率论与数理统计</span>
@@ -74,17 +75,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <a href="#main-content" className="skip-link">跳到主要内容</a>
       <aside className="app-sidebar">
         <div className="px-5 py-6">{brand}</div>
-        <div className="mx-4 mb-4 rounded-2xl border border-slate-700 bg-slate-800 p-3.5">
-          <div className="text-sm font-bold text-teal-300">专属课程题库</div>
-          <p className="mt-1.5 text-sm leading-5 text-slate-300">1007 道概率统计题目与解析</p>
+        <div className="course-library-card mx-4 mb-4 rounded-2xl p-3.5">
+          <div className="text-sm font-bold text-teal-800">专属课程题库</div>
+          <p className="mt-1.5 text-sm leading-5 text-slate-600">1007 道概率统计题目与解析</p>
         </div>
         <p className="px-6 pb-2 pt-2 text-sm font-bold text-slate-500">课程空间</p>
         <Menu mode="inline" selectedKeys={[current.path]} items={menuItems} onClick={selectMenu} className="app-menu" />
         <div className="mt-auto p-4">
-          <div className="rounded-2xl bg-teal-700 p-4 text-white">
-            <p className="text-sm font-bold text-teal-50">学习小提示</p>
-            <p className="mt-2 text-sm font-medium leading-6 tracking-[.01em] text-teal-50">先尝试自己作答，再选择提示，学习效果会更好。</p>
-            <button onClick={() => navigate("/tutor")} className="mt-3 flex items-center gap-1 text-sm font-bold text-white">开始提问 <RightOutlined className="text-xs" /></button>
+          <div className="study-tip rounded-2xl p-4">
+            <p className="text-sm font-bold text-teal-900">学习小提示</p>
+            <p className="mt-2 text-sm font-medium leading-6 tracking-[.01em] text-slate-600">先尝试自己作答，再选择提示，学习效果会更好。</p>
+            <button onClick={() => navigate("/tutor")} className="mt-3 flex items-center gap-1 text-sm font-bold text-teal-800">开始提问 <RightOutlined className="text-xs" /></button>
           </div>
         </div>
       </aside>

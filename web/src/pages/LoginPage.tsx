@@ -4,6 +4,7 @@ import { ArrowRightOutlined, BookOutlined, CheckCircleOutlined, CodeOutlined, Da
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/api/client";
+import { BrandMark } from "@/components/BrandMark";
 
 export default function LoginPage() {
   const staticPreview = import.meta.env.VITE_STATIC_PREVIEW === "true";
@@ -63,27 +64,27 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f7f6] text-slate-800">
+    <div className="min-h-screen bg-[#f6f7f3] text-slate-800">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 lg:px-10">
-          <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-800 text-xl font-black text-white">π</span><div><div className="text-[15px] font-extrabold tracking-tight text-slate-900">概率统计教学助手</div><div className="mt-0.5 text-sm font-medium text-slate-500">概率论与数理统计课程平台</div></div></div>
+          <div className="flex items-center gap-3"><BrandMark /><div><div className="text-[15px] font-extrabold tracking-tight text-slate-900">概率统计教学助手</div><div className="mt-0.5 text-sm font-medium text-slate-500">概率论与数理统计课程平台</div></div></div>
           <div className="hidden items-center gap-2 text-sm text-slate-500 sm:flex"><BookOutlined />专属课程题库</div>
         </div>
       </header>
       <main className="mx-auto grid min-h-[calc(100vh-128px)] max-w-7xl items-center gap-8 px-6 py-8 lg:grid-cols-[1.1fr_0.8fr] lg:px-10">
-        <section className="rounded-2xl bg-teal-700 p-8 text-white lg:p-12">
-          <p className="mb-4 text-sm font-bold text-teal-100">为大学概率统计课程而设计</p>
-          <h1 className="max-w-xl text-4xl font-black leading-[1.2] tracking-tight text-white lg:text-5xl">从题库出发，<br />把解题与教学讲清楚</h1>
-          <p className="mt-6 max-w-xl text-base leading-8 text-teal-50">面向大学概率论与数理统计课程，为学生提供循序渐进的题目辅导，也为教师提供可编辑、可保存的课堂教学设计。</p>
-          <div className="mt-9 max-w-xl divide-y divide-teal-600 border-y border-teal-600">
+        <section className="rounded-2xl border border-[#d7e5dd] bg-[#edf4ef] p-8 lg:p-12">
+          <p className="mb-4 text-sm font-bold text-teal-800">为大学概率统计课程而设计</p>
+          <h1 className="max-w-xl text-4xl font-black leading-[1.2] tracking-tight text-slate-950 lg:text-5xl">从题库出发，<br />把解题与教学讲清楚</h1>
+          <p className="mt-6 max-w-xl text-base leading-8 text-slate-600">面向大学概率论与数理统计课程，为学生提供循序渐进的题目辅导，也为教师提供可编辑、可保存的课堂教学设计。</p>
+          <div className="mt-9 max-w-xl divide-y divide-[#d2e2d9] border-y border-[#d2e2d9]">
             <Feature title="专属题库" detail="1007 道题及标准解析" icon={<DatabaseOutlined />} />
             <Feature title="分步辅导" detail="提示、检查与完整讲解" icon={<CheckCircleOutlined />} />
             <Feature title="教学设计" detail="生成、编辑与历史保存" icon={<ReadOutlined />} />
           </div>
           <div className="mt-7">
-            <p className="text-sm font-bold text-teal-100">完整教学闭环</p>
-            <ol className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-teal-600 sm:grid-cols-4">
-              {['理解概念', '尝试作答', '获得反馈', '实验验证'].map((item, index) => <li key={item} className="bg-teal-800 p-3"><span className="text-sm font-black text-teal-200">{index + 1}</span><span className="mt-1 block text-sm font-bold text-white">{item}</span></li>)}
+            <p className="text-sm font-bold text-teal-900">完整教学闭环</p>
+            <ol className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[#d2e2d9] bg-[#d2e2d9] sm:grid-cols-4">
+              {['理解概念', '尝试作答', '获得反馈', '实验验证'].map((item, index) => <li key={item} className="bg-white/80 p-3"><span className="text-sm font-black text-teal-700">{String(index + 1).padStart(2, '0')}</span><span className="mt-1 block text-sm font-bold text-slate-800">{item}</span></li>)}
             </ol>
           </div>
         </section>
@@ -99,7 +100,7 @@ export default function LoginPage() {
                 <ArrowRightOutlined className="text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-teal-700" />
               </button>
               <button onClick={() => startDemo("student")} className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200 p-4 text-left transition hover:border-teal-400 hover:bg-teal-50/60">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-xl text-white"><BookOutlined /></span>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#e9eee9] text-xl text-teal-800"><BookOutlined /></span>
                 <span className="min-w-0 flex-1"><span className="block font-extrabold text-slate-900">进入学生端演示</span><span className="mt-1 block text-sm leading-5 text-slate-500">班级任务、题库答疑与个性化学习路径</span></span>
                 <ArrowRightOutlined className="text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-teal-700" />
               </button>
@@ -142,5 +143,5 @@ export default function LoginPage() {
 }
 
 function Feature({ title, detail, icon }: { title: string; detail: string; icon: React.ReactNode }) {
-  return <div className="flex items-center gap-4 py-4"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 text-lg text-white">{icon}</span><span><h3 className="text-sm font-extrabold text-white">{title}</h3><p className="mt-0.5 text-sm text-teal-50">{detail}</p></span></div>;
+  return <div className="flex items-center gap-4 py-4"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#c9ddd3] bg-white/75 text-lg text-teal-800">{icon}</span><span><h3 className="text-sm font-extrabold text-slate-900">{title}</h3><p className="mt-0.5 text-sm text-slate-600">{detail}</p></span></div>;
 }

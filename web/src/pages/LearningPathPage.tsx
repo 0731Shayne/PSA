@@ -90,19 +90,19 @@ export default function LearningPathPage() {
   const visibleMastery = showAll ? profile.mastery : profile.mastery.slice(0, 8);
 
   return <div className="mx-auto max-w-7xl">
-    <header className="overflow-hidden rounded-2xl bg-slate-950 text-white">
+    <header className="overflow-hidden rounded-2xl border border-[#d7e5dd] bg-[#edf4ef]">
       <div className="grid gap-8 px-6 py-8 sm:px-8 lg:grid-cols-[1fr_340px] lg:px-10 lg:py-10">
         <div className="max-w-3xl">
-          <div className="mb-3 flex flex-wrap items-center gap-2"><Tag color="cyan" className="!m-0">{evidenceLabel[profile.summary.evidence_level]}</Tag><span className="text-sm text-slate-300">基于 {profile.evidence.questions} 道题、{profile.evidence.attempts} 次作答</span></div>
-          <h1 className="text-3xl font-black leading-tight">下一步，先学好“{profile.summary.next_focus}”</h1>
-          <p className="mt-3 max-w-2xl text-[15px] leading-7 text-slate-300">路径依据题库知识点、作答结果、错误类型和提示使用情况生成。每完成一组题，掌握度和后续顺序都会更新。</p>
+          <div className="mb-3 flex flex-wrap items-center gap-2"><Tag color="cyan" className="!m-0">{evidenceLabel[profile.summary.evidence_level]}</Tag><span className="text-sm text-slate-600">基于 {profile.evidence.questions} 道题、{profile.evidence.attempts} 次作答</span></div>
+          <h1 className="text-3xl font-black leading-tight text-slate-950">下一步，先学好“{profile.summary.next_focus}”</h1>
+          <p className="mt-3 max-w-2xl text-[15px] leading-7 text-slate-600">路径依据题库知识点、作答结果、错误类型和提示使用情况生成。每完成一组题，掌握度和后续顺序都会更新。</p>
           <Button className="!mt-6" type="primary" size="large" onClick={() => profile.path[0]?.question_ids[0] ? navigate(`/questions?query=${profile.path[0].question_ids[0]}&task=1`) : navigate("/questions")}>
             开始当前任务 <ArrowRightOutlined />
           </Button>
         </div>
-        <div className="flex items-center gap-6 border-t border-slate-700 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-          <Progress type="circle" percent={profile.summary.overall_mastery} size={116} strokeColor="#2dd4bf" trailColor="#334155" format={value => <span className="font-black text-white">{value}%</span>} />
-          <div className="space-y-2 text-sm"><p><span className="font-black text-emerald-300">{profile.summary.strong_keypoints}</span> 个知识点已掌握</p><p><span className="font-black text-amber-300">{profile.summary.risk_keypoints}</span> 个知识点需巩固</p><p className="text-slate-400">已评估 {profile.summary.assessed_keypoints} 个知识点</p></div>
+        <div className="flex items-center gap-6 border-t border-[#cfded6] pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+          <Progress type="circle" percent={profile.summary.overall_mastery} size={116} strokeColor="#0f766e" trailColor="#dbe8e1" format={value => <span className="font-black text-slate-900">{value}%</span>} />
+          <div className="space-y-2 text-sm text-slate-700"><p><span className="font-black text-emerald-700">{profile.summary.strong_keypoints}</span> 个知识点已掌握</p><p><span className="font-black text-amber-700">{profile.summary.risk_keypoints}</span> 个知识点需巩固</p><p className="text-slate-500">已评估 {profile.summary.assessed_keypoints} 个知识点</p></div>
         </div>
       </div>
     </header>

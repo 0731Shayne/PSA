@@ -34,22 +34,22 @@ export default function Dashboard() {
     <div>
       {loadError && <Alert className="mb-5" type="error" showIcon message="暂时无法载入学习数据" description="请检查网络连接后重试；导航仍可使用，数据将在连接恢复后更新。" action={<Button size="small" onClick={() => setReloadKey(value => value + 1)}>重新加载</Button>} />}
 
-      <section className="relative grid overflow-hidden rounded-2xl bg-slate-950 px-7 py-9 text-white sm:px-9 lg:grid-cols-[1fr_360px] lg:gap-12 lg:px-12 lg:py-12">
+      <section className="relative grid overflow-hidden rounded-2xl border border-[#d7e5dd] bg-[#edf4ef] px-7 py-9 sm:px-9 lg:grid-cols-[1fr_360px] lg:gap-10 lg:px-12 lg:py-12">
         <div className="relative max-w-3xl">
-          <p className="mb-4 flex items-center gap-2 text-sm font-semibold text-teal-50/90"><span className="h-2 w-2 rounded-full bg-emerald-300" />你好，{user?.name}</p>
-          <h1 className="max-w-2xl text-3xl font-black leading-tight lg:text-[40px]">{teacher ? "把知识点组织成一堂好课" : "从一道题开始，真正理解概率统计"}</h1>
-          <p className="mt-4 max-w-xl text-[15px] leading-7 text-teal-50/85">{teacher ? "从专属题库生成分层学习单、课堂检测与认知断层预警。" : "系统会根据作答、错误类型和提示使用情况，持续更新你的学习路径。"}</p>
+          <p className="mb-4 flex items-center gap-2 text-sm font-semibold text-teal-800"><span className="h-2 w-2 rounded-full bg-teal-600" />你好，{user?.name}</p>
+          <h1 className="max-w-2xl text-3xl font-black leading-tight text-slate-950 lg:text-[40px]">{teacher ? "把知识点组织成一堂好课" : "从一道题开始，真正理解概率统计"}</h1>
+          <p className="mt-4 max-w-xl text-[15px] leading-7 text-slate-600">{teacher ? "从专属题库生成分层学习单、课堂检测与认知断层预警。" : "系统会根据作答、错误类型和提示使用情况，持续更新你的学习路径。"}</p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <button onClick={() => navigate(teacher ? "/classrooms" : "/tasks")} className="rounded-xl bg-white px-5 py-3 text-sm font-extrabold text-teal-800 transition hover:bg-teal-50 active:translate-y-px">{teacher ? "查看班级认知雷达" : "查看我的任务"} <ArrowRightOutlined className="ml-2" /></button>
-            <button onClick={() => navigate("/questions")} className="rounded-xl border border-white/30 bg-transparent px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 active:translate-y-px">浏览课程题库</button>
+            <button onClick={() => navigate(teacher ? "/classrooms" : "/tasks")} className="rounded-xl bg-teal-700 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-teal-800 active:translate-y-px">{teacher ? "查看班级认知雷达" : "查看我的任务"} <ArrowRightOutlined className="ml-2" /></button>
+            <button onClick={() => navigate("/questions")} className="rounded-xl border border-[#c8dad1] bg-white/75 px-5 py-3 text-sm font-bold text-slate-700 transition hover:border-teal-500 hover:text-teal-800 active:translate-y-px">浏览课程题库</button>
           </div>
         </div>
-        <div className="mt-10 hidden border-l border-slate-700 pl-10 lg:block" aria-label="概率统计公式示例">
-          <p className="text-sm font-bold text-teal-300">今日公式</p>
-          <div className="mt-5 font-mono text-[28px] font-bold leading-relaxed text-white">P(A|B)</div>
-          <div className="font-mono text-xl leading-relaxed text-teal-200">= P(B|A)P(A) / P(B)</div>
-          <p className="mt-5 text-sm leading-6 text-slate-300">贝叶斯公式把新的观测证据转化为对事件概率的更新。</p>
-          <button onClick={() => navigate("/questions?keypoint=贝叶斯公式")} className="mt-5 text-sm font-bold text-teal-300 hover:text-teal-200">查看相关题目 <ArrowRightOutlined className="ml-1" /></button>
+        <div className="mt-10 hidden rounded-2xl border border-[#d2e2d9] bg-white/65 p-7 lg:mt-0 lg:block" aria-label="概率统计公式示例">
+          <p className="text-sm font-bold text-teal-800">今日公式</p>
+          <div className="mt-5 font-mono text-[28px] font-bold leading-relaxed text-slate-900">P(A|B)</div>
+          <div className="font-mono text-xl leading-relaxed text-teal-800">= P(B|A)P(A) / P(B)</div>
+          <p className="mt-5 text-sm leading-6 text-slate-600">贝叶斯公式把新的观测证据转化为对事件概率的更新。</p>
+          <button onClick={() => navigate("/questions?keypoint=贝叶斯公式")} className="mt-5 text-sm font-bold text-teal-800 hover:text-teal-950">查看相关题目 <ArrowRightOutlined className="ml-1" /></button>
         </div>
       </section>
 
