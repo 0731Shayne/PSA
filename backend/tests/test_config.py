@@ -30,3 +30,16 @@ def test_valid_production_configuration(monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_ORIGINS", ["https://example.invalid"])
 
     config.validate_runtime_config()
+
+
+def test_production_rejects_enabled_ragflow_without_api_key(monkeypatch):
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "SECRET_KEY", "a-secure-production-secret-with-32-chars")
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql+asyncpg://user:pass@db/app")
+    monkeypatch.setattr(config, "ALLOWED_ORIGINS", ["https://example.invalid"])
+    monkeypatch.setattr(config, "KNOWLEDGE_BACKEND", "ragflow")
+    monkeypatch.setattr(config, "RAGFLOW_BASE_URL", "https://ragflow.example.invalid")
+    monkeypatch.setattr(config, "RAGFLOW_API_KEY", "")
+
+    with pytest.raises(RuntimeError, match="RAGFLOW_API_KEY"):
+        config.validate_runtime_config()

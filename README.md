@@ -11,6 +11,7 @@
 - 教师端：按主题、课时、课堂类型、学情基线和指定题号生成教师执行版、无答案学生学习单与证据报告，可编辑、保存、分别导出，并把任一层级直接发布为班级任务
 - 身份登录：账号分为 `student` 和 `teacher`，教师注册需要部署方配置的邀请码；浏览器会话使用 HttpOnly Cookie
 - 专属题库：内置 `P000001`—`P001007` 共 1007 道题
+- 可替换 RAG 课程资料库：本地作品模式由 Ollama `bge-m3` 生成真实 Embedding、SQLite 保存向量并计算余弦相似度；企业模式切换到 RAGFlow。资料可绑定班级，回答会展示题目与文件片段两类依据
 - 会话记忆：自动保存历史会话，并携带最近 20 条消息支持连续追问
 
 学习路径依据题库 `keypoint_ids`、作答正确性、错误类型、提示次数和重复尝试动态计算。预警至少需要两次相关作答证据；证据较少时会明确标记低可信度，不把一次失误直接判断为知识断层。
@@ -26,6 +27,8 @@
 - 本地开发无需单独安装数据库
 - PostgreSQL 17（正式环境）
 - Docker 与 Docker Compose（可选，用于一键模拟正式部署）
+- Ollama + `bge-m3`（本地知识库演示）
+- RAGFlow（可选；企业规模知识库单独部署）
 
 ## 本地开发（SQLite）
 
@@ -49,6 +52,18 @@ npm run dev
 ```
 
 浏览器访问 `http://localhost:5173`。SQLite 数据默认写入 `backend/teaching_assistant.db`，适合开发和测试。
+
+启动本地知识库前安装并运行 Embedding 模型：
+
+```bash
+brew install ollama
+brew services start ollama
+ollama pull bge-m3
+```
+
+`brew services start ollama` 会让 Ollama 在后台运行并随登录启动。如果只想临时前台运行，可以先停止后台服务，再执行 `ollama serve`。
+
+本地算法、Mac 运行和面试讲解见 [本地简化 RAG 演示指南](docs/LOCAL_RAG_DEMO.md)；企业部署与替换边界见 [RAGFlow 课程资料库接入指南](docs/RAGFLOW_KNOWLEDGE_BASE.md)。将 `KNOWLEDGE_BACKEND=disabled` 时，内置题库、班级、教学包和原有智能答疑仍可正常运行。
 
 ## GitHub Pages 静态预览
 
@@ -116,6 +131,16 @@ docker compose down
 | `MINERU_MODEL` | 图片解析模型，默认 `vlm`，也可配置 `pipeline` |
 | `MINERU_TIMEOUT_SECONDS` | 单张图片识别等待上限，默认 120 秒 |
 | `MINERU_USE_ENV_PROXY` | 是否读取系统代理变量，默认 `false` |
+| `KNOWLEDGE_BACKEND` | `local` 用于作品演示，`ragflow` 用于企业部署，`disabled` 关闭课程资料检索 |
+| `LOCAL_EMBEDDING_BASE_URL` | Ollama 地址，本机默认 `http://localhost:11434` |
+| `LOCAL_EMBEDDING_MODEL` | 本地真实 Embedding 模型，默认 `bge-m3` |
+| `LOCAL_CHUNK_SIZE` / `LOCAL_CHUNK_OVERLAP` | 本地文本块大小与重叠字符数，默认 900/120 |
+| `RAGFLOW_BASE_URL` | RAGFlow 服务地址；应用在 Docker 内、RAGFlow 在宿主机时通常为 `http://host.docker.internal:9380` |
+| `RAGFLOW_API_KEY` | RAGFlow HTTP API Key，只保存在后端环境变量中 |
+| `RAGFLOW_EMBEDDING_MODEL` | 可选；RAGFlow 中已配置的模型标识，例如 `bge-m3@Ollama`；留空使用其默认模型 |
+| `RAGFLOW_RERANK_ID` | 可选的 Rerank 模型标识；第一版可留空 |
+| `RAGFLOW_CHUNK_METHOD` | 文档切分策略，课程讲义默认 `book` |
+| `RAGFLOW_*THRESHOLD` / `*_WEIGHT` / `TOP_K` | 召回阈值、向量权重和候选上限，先使用模板默认值并用真实问题评测后调整 |
 
 不使用 Docker、直接连接企业 PostgreSQL 时设置：
 
@@ -197,6 +222,7 @@ CI 会分别在全新 SQLite 和真实 PostgreSQL 数据库上执行 `alembic up
 
 - `/health/live`：应用进程存活
 - `/health/ready`：应用可以连接数据库
+- `/api/knowledge/health`：教师登录后检查 Ollama/bge-m3 或 RAGFlow；知识库后端异常不会改变主应用的就绪状态
 
 ## 团队协作
 
@@ -206,7 +232,7 @@ CI 会分别在全新 SQLite 和真实 PostgreSQL 数据库上执行 `alembic up
 
 本仓库交付应用源代码、依赖清单、数据库迁移、容器配置、配置模板和部署说明，不包含公网服务器。部署方负责提供实际服务器、域名、HTTPS 证书、数据库密码、`SECRET_KEY`、模型 API Key、网络入口限流/WAF、网络策略以及日常备份与监控。
 
-学生提交的文字答案、解题思路与答疑文字可能发送给部署方配置的模型服务；配置 `MINERU_TOKEN` 后，上传的手写图片会发送至 MinerU Cloud OCR 识别文字和公式，识别结果随后进入诊断模型。系统界面会明确标识使用 MinerU。企业部署前应按自身制度确认模型供应商、隐私告知、数据保存周期和删除流程。
+学生提交的文字答案、解题思路与答疑文字可能发送给部署方配置的模型服务；配置 `MINERU_TOKEN` 后，上传的手写图片会发送至 MinerU Cloud OCR 识别文字和公式，识别结果随后进入诊断模型。`local` 模式会在 PSA 数据库保存课程提取文本、切片和 Embedding 向量；`ragflow` 模式会把课程文件发送至所配置的 RAGFlow。系统界面会明确标识这些数据边界。企业部署前应按自身制度确认模型供应商、隐私告知、数据保存周期和删除流程。
 
 交付前不得把 `.env`、数据库文件、真实密码、真实 API Key 或企业内部地址提交到仓库。
 
