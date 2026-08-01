@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .session import Base
@@ -103,6 +103,85 @@ class ClassroomMembership(Base):
     classroom_id: Mapped[int] = mapped_column(ForeignKey("classrooms.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeSpace(Base):
+    """A teacher-owned collection backed by local vectors or RAGFlow."""
+
+    __tablename__ = "knowledge_spaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backend: Mapped[str] = mapped_column(String(24), nullable=False, server_default="local")
+    provider_dataset_id: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="creating")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class KnowledgeDocument(Base):
+    """Permission, parsed text and lifecycle metadata for a course document."""
+
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    space_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_document_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    material_type: Mapped[str] = mapped_column(String(24), nullable=False, server_default="concept")
+    student_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="parsing")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class KnowledgeChunk(Base):
+    """A locally embedded document chunk stored as JSON for small demo libraries."""
+
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClassroomKnowledgeSpace(Base):
+    """Makes a teacher-owned knowledge space available to one classroom."""
+
+    __tablename__ = "classroom_knowledge_spaces"
+    __table_args__ = (
+        UniqueConstraint("classroom_id", "space_id", name="uq_classroom_knowledge_space"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    classroom_id: Mapped[int] = mapped_column(
+        ForeignKey("classrooms.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    space_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class LearningAssignment(Base):

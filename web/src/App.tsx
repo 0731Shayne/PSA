@@ -16,6 +16,7 @@ const ExperimentLab = lazy(() => import("./pages/ExperimentLab"));
 const LearningPathPage = lazy(() => import("./pages/LearningPathPage"));
 const ClassroomRadarPage = lazy(() => import("./pages/ClassroomRadarPage"));
 const MyTasksPage = lazy(() => import("./pages/MyTasksPage"));
+const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"));
 
 const protectedPage = (node: React.ReactNode) => (
   <ProtectedRoute><AppLayout>{node}</AppLayout></ProtectedRoute>
@@ -77,6 +78,7 @@ export default function App() {
                   <Route path="/classrooms" element={protectedPage(<ClassroomRadarPage />)} />
                   <Route path="/tasks" element={protectedPage(<MyTasksPage />)} />
                   <Route path="/teaching" element={protectedPage(<TeachingStudio />)} />
+                  <Route path="/knowledge" element={protectedPage(<KnowledgeBasePage />)} />
                   <Route path="*" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
               </Suspense>

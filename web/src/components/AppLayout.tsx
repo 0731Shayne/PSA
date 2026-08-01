@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Avatar, Button, Drawer, Dropdown, Menu, Popconfirm, Tooltip, message } from "antd";
 import type { MenuProps } from "antd";
-import { BookOutlined, CheckSquareOutlined, ExperimentOutlined, HomeOutlined, LogoutOutlined, MenuOutlined, MessageOutlined, NodeIndexOutlined, RadarChartOutlined, ReadOutlined, ReloadOutlined, RightOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
+import { BookOutlined, CheckSquareOutlined, DatabaseOutlined, ExperimentOutlined, HomeOutlined, LogoutOutlined, MenuOutlined, MessageOutlined, NodeIndexOutlined, RadarChartOutlined, ReadOutlined, ReloadOutlined, RightOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { resetDemoData } from "@/demo/demoApi";
@@ -23,12 +23,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const classroomItem = { path: "/classrooms", label: "班级认知雷达", shortLabel: "班级", icon: <RadarChartOutlined /> };
   const taskItem = { path: "/tasks", label: "我的任务", shortLabel: "任务", icon: <CheckSquareOutlined /> };
   const teachingItem = { path: "/teaching", label: "分层教学包", shortLabel: "教学", icon: <ReadOutlined /> };
+  const knowledgeItem = { path: "/knowledge", label: "课程资料库", shortLabel: "资料", icon: <DatabaseOutlined /> };
   const pathItem = { path: "/learning-path", label: "学习路径", shortLabel: "路径", icon: <NodeIndexOutlined /> };
   const nav = teacher
-    ? [items[0], classroomItem, teachingItem, ...items.slice(1)]
+    ? [items[0], classroomItem, teachingItem, knowledgeItem, ...items.slice(1)]
     : [items[0], taskItem, ...items.slice(1), pathItem];
   const mobileNav = teacher
-    ? [items[0], classroomItem, teachingItem, items[1], items[2]]
+    ? [items[0], classroomItem, knowledgeItem, items[1], items[2]]
     : [items[0], taskItem, items[1], items[2], pathItem];
   const current = nav.find(item => location.pathname.startsWith(item.path)) || nav[0];
   const menuItems: MenuProps["items"] = nav.map(item => ({ key: item.path, icon: item.icon, label: item.label }));
