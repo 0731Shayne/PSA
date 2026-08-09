@@ -2,9 +2,10 @@ export function BrandMark({ className = "" }: { className?: string }) {
   return (
     <span className={`brand-mark ${className}`} aria-hidden="true">
       <svg viewBox="0 0 48 48" role="presentation">
-        <path className="brand-mark-axis" d="M11 35.5h26" />
-        <path className="brand-mark-bars" d="M15 34V29m6 5V23m6 11V17m6 17v-8" />
-        <path className="brand-mark-curve" d="M11.5 29.5c4.3-.2 6.4-2.1 8.1-5.7 1.5-3.2 3.2-8.5 7.4-8.5 4.3 0 5.3 6.8 9.5 10.2" />
+        <path className="brand-mark-axis" d="M9.5 36.5h29M12 39V10" />
+        <path className="brand-mark-bars" d="M16 35v-5m6 5V24m6 11V17m6 18v-9" />
+        <path className="brand-mark-curve" d="M10.5 32c5.2-.1 7.5-1.8 9.5-6.3 1.8-4.1 3.7-10.4 8.2-10.4 4.7 0 5.8 8.2 10.1 12.2" />
+        <circle className="brand-mark-point" cx="28.2" cy="15.3" r="2.15" />
       </svg>
     </span>
   );

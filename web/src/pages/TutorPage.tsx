@@ -194,7 +194,7 @@ export default function TutorPage() {
       <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-5 text-slate-600"><BulbOutlined className="mr-1 text-teal-700" /> 最近 20 条消息会用于理解追问；全部会话会在刷新后保留。</div>
   </>;
 
-  return <div className="mx-auto grid min-w-0 max-w-6xl gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+  return <div className="course-page tutor-page mx-auto grid min-w-0 max-w-6xl gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
     <aside className="tutor-sidebar hidden h-[calc(100vh-132px)] min-w-0 flex-col rounded-2xl border p-5 xl:flex">
       {sidebarContent}
     </aside>

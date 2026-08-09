@@ -64,43 +64,45 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f7f3] text-slate-800">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 lg:px-10">
-          <div className="flex items-center gap-3"><BrandMark /><div><div className="text-[15px] font-extrabold tracking-tight text-slate-900">概率统计教学助手</div><div className="mt-0.5 text-sm font-medium text-slate-500">概率论与数理统计课程平台</div></div></div>
-          <div className="hidden items-center gap-2 text-sm text-slate-500 sm:flex"><BookOutlined />专属课程题库</div>
+    <div className="login-page">
+      <header className="login-header">
+        <div className="login-header-inner">
+          <div className="login-brand"><BrandMark /><div><div>概率统计教学助手</div><p>概率论与数理统计课程平台</p></div></div>
+          <div className="login-library"><BookOutlined /> COURSE ARCHIVE · 1007</div>
         </div>
       </header>
-      <main className="mx-auto grid min-h-[calc(100vh-128px)] max-w-7xl items-center gap-8 px-6 py-8 lg:grid-cols-[1.1fr_0.8fr] lg:px-10">
-        <section className="rounded-2xl border border-[#d7e5dd] bg-[#edf4ef] p-8 lg:p-12">
-          <p className="mb-4 text-sm font-bold text-teal-800">为大学概率统计课程而设计</p>
-          <h1 className="max-w-xl text-4xl font-black leading-[1.2] tracking-tight text-slate-950 lg:text-5xl">从题库出发，<br />把解题与教学讲清楚</h1>
-          <p className="mt-6 max-w-xl text-base leading-8 text-slate-600">面向大学概率论与数理统计课程，为学生提供循序渐进的题目辅导，也为教师提供可编辑、可保存的课堂教学设计。</p>
-          <div className="mt-9 max-w-xl divide-y divide-[#d2e2d9] border-y border-[#d2e2d9]">
+      <main className="login-layout">
+        <section className="login-story">
+          <div className="login-story-index"><span>PSA · 2026</span><span>教学版</span></div>
+          <p className="login-eyebrow">为大学概率统计课程而设计</p>
+          <h1>从题库出发，<br />把解题与教学讲清楚</h1>
+          <p className="login-intro">面向大学概率论与数理统计课程，为学生提供循序渐进的题目辅导，也为教师提供可编辑、可保存的课堂教学设计。</p>
+          <DistributionFigure />
+          <div className="login-features">
             <Feature title="专属题库" detail="1007 道题及标准解析" icon={<DatabaseOutlined />} />
             <Feature title="分步辅导" detail="提示、检查与完整讲解" icon={<CheckCircleOutlined />} />
             <Feature title="教学设计" detail="生成、编辑与历史保存" icon={<ReadOutlined />} />
           </div>
-          <div className="mt-7">
-            <p className="text-sm font-bold text-teal-900">完整教学闭环</p>
-            <ol className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[#d2e2d9] bg-[#d2e2d9] sm:grid-cols-4">
-              {['理解概念', '尝试作答', '获得反馈', '实验验证'].map((item, index) => <li key={item} className="bg-white/80 p-3"><span className="text-sm font-black text-teal-700">{String(index + 1).padStart(2, '0')}</span><span className="mt-1 block text-sm font-bold text-slate-800">{item}</span></li>)}
+          <div className="login-loop">
+            <p>完整教学闭环</p>
+            <ol>
+              {['理解概念', '尝试作答', '获得反馈', '实验验证'].map((item, index) => <li key={item}><span>{String(index + 1).padStart(2, '0')}</span><strong>{item}</strong></li>)}
             </ol>
           </div>
         </section>
-        <section className="flex justify-center lg:justify-end">
-          <div className="w-full max-w-[440px] rounded-2xl border border-slate-200 bg-white p-8 lg:p-10">
-          <div className="mb-8"><p className="mb-2 text-sm font-bold text-teal-700">{staticPreview ? "在线产品演示" : "账号入口"}</p><h2 className="text-2xl font-black tracking-tight text-slate-900">{staticPreview ? "选择一个视角开始体验" : register ? "创建账号" : "登录教学平台"}</h2><p className="mt-2 text-sm text-slate-500">{staticPreview ? "无需账号，演示数据不会上传或影响其他访客" : register ? "选择使用身份，进入对应工作台" : "使用你的课程平台账号继续"}</p></div>
+        <section className="login-entry">
+          <div className="login-card">
+          <div className="login-card-heading"><p>{staticPreview ? "在线产品演示" : "账号入口"}</p><h2>{staticPreview ? "选择一个视角开始体验" : register ? "创建账号" : "登录教学平台"}</h2><span>{staticPreview ? "无需账号，演示数据不会上传或影响其他访客" : register ? "选择使用身份，进入对应工作台" : "使用你的课程平台账号继续"}</span></div>
           {staticPreview ? <>
             <Alert className="mb-5" showIcon type="info" message="这是模拟数据演示" description="你可以浏览全部页面并体验主要交互；数据仅保存在当前浏览器。" />
             <div className="space-y-3">
-              <button onClick={() => startDemo("teacher")} className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200 p-4 text-left transition hover:border-teal-400 hover:bg-teal-50/60">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-teal-700 text-xl text-white"><TeamOutlined /></span>
+              <button onClick={() => startDemo("teacher")} className="demo-role-button group">
+                <span className="demo-role-icon primary"><TeamOutlined /></span>
                 <span className="min-w-0 flex-1"><span className="block font-extrabold text-slate-900">进入教师端演示</span><span className="mt-1 block text-sm leading-5 text-slate-500">班级雷达、分组干预与分层教学包</span></span>
                 <ArrowRightOutlined className="text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-teal-700" />
               </button>
-              <button onClick={() => startDemo("student")} className="group flex w-full items-center gap-4 rounded-2xl border border-slate-200 p-4 text-left transition hover:border-teal-400 hover:bg-teal-50/60">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#e9eee9] text-xl text-teal-800"><BookOutlined /></span>
+              <button onClick={() => startDemo("student")} className="demo-role-button group">
+                <span className="demo-role-icon"><BookOutlined /></span>
                 <span className="min-w-0 flex-1"><span className="block font-extrabold text-slate-900">进入学生端演示</span><span className="mt-1 block text-sm leading-5 text-slate-500">班级任务、题库答疑与个性化学习路径</span></span>
                 <ArrowRightOutlined className="text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-teal-700" />
               </button>
@@ -137,11 +139,15 @@ export default function LoginPage() {
         </div>
       </section>
       </main>
-      <footer className="mx-auto flex h-12 max-w-7xl items-center border-t border-slate-200 px-6 text-sm text-slate-500 lg:px-10">概率统计教学助手 · 概率论与数理统计课程支持</footer>
+      <footer className="login-footer">概率统计教学助手 <span>·</span> 概率论与数理统计课程支持</footer>
     </div>
   );
 }
 
 function Feature({ title, detail, icon }: { title: string; detail: string; icon: React.ReactNode }) {
-  return <div className="flex items-center gap-4 py-4"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#c9ddd3] bg-white/75 text-lg text-teal-800">{icon}</span><span><h3 className="text-sm font-extrabold text-slate-900">{title}</h3><p className="mt-0.5 text-sm text-slate-600">{detail}</p></span></div>;
+  return <div className="login-feature"><span>{icon}</span><div><h3>{title}</h3><p>{detail}</p></div></div>;
+}
+
+function DistributionFigure() {
+  return <div className="login-figure" aria-hidden="true"><svg viewBox="0 0 620 160"><path className="login-figure-grid" d="M5 130h610M67 15v115M188 15v115M309 15v115M430 15v115M551 15v115M5 95h610M5 60h610M5 25h610" /><path className="login-figure-area" d="M6 129c68-1 119-8 162-34 43-27 68-71 137-72 69-1 94 47 137 73 42 25 100 32 172 33z" /><path className="login-figure-curve" d="M6 129c68-1 119-8 162-34 43-27 68-71 137-72 69-1 94 47 137 73 42 25 100 32 172 33" /><path className="login-figure-line" d="M305 23v107" /><circle cx="305" cy="23" r="4" /><text x="315" y="18">E(X)</text><text x="581" y="148">x</text></svg></div>;
 }

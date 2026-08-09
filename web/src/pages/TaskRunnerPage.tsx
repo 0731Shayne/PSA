@@ -165,8 +165,8 @@ export default function TaskRunnerPage() {
   if (loadError || !assignment) return <Empty description="任务不存在、已撤回，或没有分配给你"><Button type="primary" onClick={() => navigate("/tasks")}>返回我的任务</Button></Empty>;
   if (!assignment.question_ids.length) return <Empty description="这项任务暂时没有题目"><Button onClick={() => navigate("/tasks")}>返回我的任务</Button></Empty>;
 
-  return <div className="mx-auto max-w-5xl">
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+  return <div className="course-page task-runner-page mx-auto max-w-5xl">
+    <div className="page-heading mb-5 flex flex-wrap items-start justify-between gap-4">
       <div><Button type="link" className="!-ml-4" icon={<ArrowLeftOutlined />} onClick={() => navigate("/tasks")}>返回我的任务</Button><h1 className="text-2xl font-bold text-slate-950">{assignment.title}</h1><p className="mt-1 text-sm leading-6 text-slate-600">{assignment.classroom_name}{assignment.description ? ` · ${assignment.description}` : ""}</p></div>
       <div className="min-w-52"><div className="mb-1.5 flex justify-between text-sm text-slate-600"><span>任务进度</span><strong>{completedCount}/{assignment.question_ids.length}</strong></div><Progress percent={Math.round(completedCount / assignment.question_ids.length * 100)} showInfo={false} strokeColor="#0f766e" /></div>
     </div>

@@ -342,9 +342,9 @@ export default function TeachingStudio() {
     }
   }
 
-  return <><div className="teaching-workspace-screen">
-    <header className="mb-6">
-      <h1 className="text-2xl font-black text-slate-900">分层教学包工作台</h1>
+  return <><div className="course-page teaching-workspace-screen">
+    <header className="page-heading mb-6">
+      <span className="page-index">TEACHER · LESSON DESIGN</span><h1 className="text-2xl font-black text-slate-900">分层教学包工作台</h1>
       <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">从题库证据生成教师执行版、学生学习单和课堂检测，并把任一层级直接发布到班级。</p>
     </header>
 

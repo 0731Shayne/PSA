@@ -164,9 +164,9 @@ export default function ClassroomRadarPage() {
     window.setTimeout(() => document.querySelector<HTMLInputElement>("#diagnostic-panel input")?.focus(), reducedMotion ? 0 : 250);
   }
 
-  return <div className="mx-auto max-w-[1440px]">
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><h1 className="text-2xl font-bold text-slate-950">班级认知雷达</h1><p className="mt-1 max-w-3xl text-base leading-7 text-slate-600">用班级任务证据识别共性断层，分组下发干预，并验证学生能否独立迁移。</p></div>
+  return <div className="course-page classroom-radar-page mx-auto max-w-[1440px]">
+    <div className="page-heading flex flex-wrap items-end justify-between gap-4">
+      <div><span className="page-index">TEACHER · CLASS EVIDENCE</span><h1 className="text-2xl font-bold text-slate-950">班级认知雷达</h1><p className="mt-1 max-w-3xl text-base leading-7 text-slate-600">用班级任务证据识别共性断层，分组下发干预，并验证学生能否独立迁移。</p></div>
       <div className="flex flex-wrap gap-2"><Button icon={<ReloadOutlined />} onClick={() => loadRadar()} disabled={!selectedId} loading={radarLoading}>刷新证据</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => setShowCreate(value => !value)}>创建班级</Button></div>
     </div>
 
