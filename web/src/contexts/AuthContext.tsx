@@ -8,11 +8,13 @@ import {
 import { apiClient } from "@/api/client";
 import { DEMO_ROLE_KEY, demoUser, isDemoMode } from "@/demo/demoApi";
 
-interface User {
+export interface User {
   id: number;
+  username: string;
   name: string;
   avatar_url: string | null;
   role: "student" | "teacher";
+  must_change_password: boolean;
 }
 
 interface AuthState {
@@ -22,6 +24,7 @@ interface AuthState {
   logout: () => Promise<void>;
   isDemo: boolean;
   enterDemo: (role: User["role"]) => void;
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthState>(null!);
@@ -77,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isDemo: isDemoMode, enterDemo }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, isDemo: isDemoMode, enterDemo, updateUser: setUser }}>
       {children}
     </AuthContext.Provider>
   );

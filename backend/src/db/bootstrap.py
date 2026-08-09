@@ -33,6 +33,7 @@ async def bootstrap_teacher() -> None:
                     name=name,
                     password_hash=hash_password(password),
                     role="teacher",
+                    must_change_password=True,
                 )
             )
             await session.commit()

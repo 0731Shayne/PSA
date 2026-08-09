@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .session import Base
@@ -17,6 +17,9 @@ class User(Base):
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, server_default="student")
+    session_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -121,6 +124,8 @@ class LearningAssignment(Base):
     kind: Mapped[str] = mapped_column(String(24), nullable=False, server_default="diagnostic")
     topic: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="published")
+    hint_policy: Mapped[str] = mapped_column(String(24), nullable=False, server_default="allowed")
+    transfer_question_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -174,6 +179,7 @@ class QuestionAttempt(Base):
     feedback: Mapped[str] = mapped_column(Text, nullable=False)
     error_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     hint_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    submitted_late: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -189,4 +195,18 @@ class ExperimentRecord(Base):
     parameters_json: Mapped[str] = mapped_column(Text, nullable=False)
     result_summary: Mapped[str] = mapped_column(Text, nullable=False)
     observation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HintEvent(Base):
+    """A server-recorded hint request used to audit independent work."""
+
+    __tablename__ = "hint_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("learning_assignments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    question_id: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -108,8 +108,11 @@ def _questions_for_keypoint(
 
 
 def build_learning_profile(
-    rows: list[dict[str, Any]], attempts: list[dict[str, Any]]
+    rows: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    completed_experiments: set[str] | None = None,
 ) -> dict[str, Any]:
+    completed_experiment_ids = completed_experiments or set()
     lookup = _question_lookup(rows)
     ids = _keypoint_ids(rows)
     evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -247,6 +250,7 @@ def build_learning_profile(
                 "question_ids": [row["ID"] for row in questions],
                 "difficulty": [row.get("hard_level") for row in questions],
                 "experiment_id": KEYPOINT_EXPERIMENT.get(concept),
+                "experiment_completed": KEYPOINT_EXPERIMENT.get(concept) in completed_experiment_ids,
                 "completed": bool(current and current["score"] >= 80 and current["confidence"] >= 35),
             }
         )
@@ -263,7 +267,8 @@ def build_learning_profile(
                 "question_ids": [],
                 "difficulty": [],
                 "experiment_id": experiment_id,
-                "completed": False,
+                "experiment_completed": experiment_id in completed_experiment_ids,
+                "completed": experiment_id in completed_experiment_ids,
             }
         )
 

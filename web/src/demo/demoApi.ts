@@ -34,7 +34,7 @@ const classrooms = [
 ];
 
 const studentTasks = [
-  { id: 101, classroom_id: 1, classroom_name: "2026级统计学1班", title: "条件概率课前诊断", description: "先独立完成，不使用提示；系统会据此安排后续任务。", kind: "diagnostic", topic: "条件概率", question_ids: ["P000001", "P000082", "P000206"], attempted_questions: 1, my_status: "assigned", due_at: "2026-08-01T12:00:00Z" },
+  { id: 101, classroom_id: 1, classroom_name: "2026级统计学1班", title: "条件概率课前诊断", description: "先独立完成，再按需使用提示；系统会据此安排后续任务。", kind: "diagnostic", topic: "条件概率", question_ids: ["P000001", "P000082", "P000206"], attempted_questions: 1, my_status: "assigned", due_at: "2026-08-15T12:00:00Z" },
   { id: 102, classroom_id: 1, classroom_name: "2026级统计学1班", title: "贝叶斯方向辨析", description: "针对条件方向混淆进行去提示练习。", kind: "intervention", topic: "贝叶斯公式", question_ids: ["P000082", "P000206"], attempted_questions: 0, my_status: "assigned", group_label: "概念巩固组" },
   { id: 99, classroom_id: 1, classroom_name: "2026级统计学1班", title: "随机变量基础检测", kind: "diagnostic", topic: "随机变量", question_ids: ["P000311", "P000405"], attempted_questions: 2, my_status: "completed" },
 ];
@@ -152,13 +152,20 @@ const experimentCatalog = [
   { experiment_id: "poisson", keypoints: ["泊松近似", "二项分布"], question_ids: ["P000405"] },
 ];
 
+type DemoExperimentRun = { id: number; experiment_id: string; parameters: Record<string, number>; result_summary: string; observation: string; created_at: string };
+const demoExperimentRuns: DemoExperimentRun[] = [
+  { id: 501, experiment_id: "bayes", parameters: { prior: 0.1, sensitivity: 0.9, specificity: 0.9 }, result_summary: "当前阳性后的后验概率 50.0%", observation: "先验率越低，同样的阳性结果越需要谨慎解释。", created_at: "2026-08-08T09:20:00Z" },
+  { id: 502, experiment_id: "bayes", parameters: { prior: 0.02, sensitivity: 0.9, specificity: 0.9 }, result_summary: "当前阳性后的后验概率 15.5%", observation: "降低先验率后，假阳性在阳性人群中的占比明显上升。", created_at: "2026-08-09T03:10:00Z" },
+];
+
 interface DemoState {
   classrooms: typeof classrooms;
   plans: typeof demoPlan[];
+  experimentRuns: typeof demoExperimentRuns;
 }
 
 function initialState(): DemoState {
-  return JSON.parse(JSON.stringify({ classrooms, plans: [demoPlan] })) as DemoState;
+  return JSON.parse(JSON.stringify({ classrooms, plans: [demoPlan], experimentRuns: demoExperimentRuns })) as DemoState;
 }
 
 function loadState(): DemoState {
@@ -180,8 +187,8 @@ export function resetDemoData() {
 
 export function demoUser(role: DemoRole) {
   return role === "teacher"
-    ? { id: 7001, name: "演示教师", avatar_url: null, role: "teacher" as const }
-    : { id: 7002, name: "演示学生", avatar_url: null, role: "student" as const };
+    ? { id: 7001, username: "demo-teacher", name: "演示教师", avatar_url: null, role: "teacher" as const, must_change_password: false }
+    : { id: 7002, username: "demo-student", name: "演示学生", avatar_url: null, role: "student" as const, must_change_password: false };
 }
 
 function response(config: InternalAxiosRequestConfig, data: unknown, status = 200): AxiosResponse {
@@ -219,9 +226,26 @@ export const demoAdapter: AxiosAdapter = async config => {
 
   if (url === "/api/question-bank/stats") return response(config, stats);
   if (url === "/api/question-bank/learning-summary") return response(config, learningSummary);
-  if (url === "/api/question-bank/learning-profile") return response(config, learningProfile);
+  if (url === "/api/question-bank/learning-profile") {
+    const completed = new Set((state.experimentRuns || []).map(item => item.experiment_id));
+    return response(config, { ...learningProfile, path: learningProfile.path.map(item => ({ ...item, experiment_completed: item.experiment_id ? completed.has(item.experiment_id) : false })) });
+  }
   if (url === "/api/question-bank/experiments/catalog") return response(config, experimentCatalog);
-  if (url === "/api/question-bank/experiments/runs" && method === "post") return response(config, { id: Date.now() }, 201);
+  if (url === "/api/question-bank/experiments/runs" && method === "get") return response(config, state.experimentRuns || []);
+  if (url === "/api/question-bank/experiments/runs" && method === "post") {
+    const values = body(config);
+    const created = { id: Date.now(), experiment_id: String(values.experiment_id || "coin"), parameters: (values.parameters || {}) as Record<string, number>, result_summary: String(values.result_summary || ""), observation: String(values.observation || ""), created_at: new Date().toISOString() };
+    state.experimentRuns = state.experimentRuns || [];
+    state.experimentRuns.unshift(created);
+    saveState(state);
+    return response(config, { id: created.id, created_at: created.created_at }, 201);
+  }
+  const experimentRunMatch = url.match(/^\/api\/question-bank\/experiments\/runs\/(\d+)$/);
+  if (experimentRunMatch && method === "delete") {
+    state.experimentRuns = (state.experimentRuns || []).filter(item => item.id !== Number(experimentRunMatch[1]));
+    saveState(state);
+    return response(config, { deleted: Number(experimentRunMatch[1]) });
+  }
   if (url === "/api/question-bank/questions" && method === "get") return response(config, questionList(config));
 
   const answerMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/answer$/i);
@@ -229,9 +253,21 @@ export const demoAdapter: AxiosAdapter = async config => {
   const hintMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/hint$/i);
   if (hintMatch) return response(config, { hint: "先写清楚已知事件和目标事件，再判断分母是否需要把所有可能来源相加。" });
   const attemptMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/attempts$/i);
-  if (attemptMatch) return response(config, { verdict: "partial", feedback: "你的方向是对的。下一步请把分母中的所有可能来源写完整，并检查条件概率的方向。", error_type: "条件方向需确认", attempt_no: 2, assignment_completed: true }, 201);
+  if (attemptMatch) {
+    const selected = questions.find(item => item.ID === attemptMatch[1].toUpperCase()) || questions[0];
+    const values = body(config);
+    const normalize = (value: unknown) => String(value || "").toLowerCase().replace(/[\s$\\{}，,。；;]/g, "");
+    const exact = normalize(values.answer) === normalize(selected.answer);
+    return response(config, { verdict: exact ? "correct" : "needs_review", feedback: exact ? "答案与演示题库标准答案一致，请再说明关键公式或依据。" : "作答已保留。请检查条件方向、分母来源和关键公式是否完整。", error_type: exact ? undefined : "表达不完整", hint_count: 0, attempt_no: 2, assignment_completed: false, submitted_late: false }, 201);
+  }
   const questionMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})$/i);
-  if (questionMatch) return response(config, questions.find(item => item.ID === questionMatch[1].toUpperCase()) || questions[0]);
+  if (questionMatch) {
+    const selected = questions.find(item => item.ID === questionMatch[1].toUpperCase()) || questions[0];
+    const assignmentId = Number((config.params as Record<string, unknown> | undefined)?.assignment_id || 0);
+    const task = studentTasks.find(item => item.id === assignmentId);
+    const role = (localStorage.getItem(DEMO_ROLE_KEY) || "student") as DemoRole;
+    return response(config, { ...selected, teacher_view: role === "teacher", answer: role === "teacher" ? selected.answer : undefined, explanation: role === "teacher" ? selected.explanation : undefined, can_reveal: task ? task.question_ids.slice(0, task.attempted_questions).includes(selected.ID) : true, hint_policy: task?.kind === "retest" ? "blocked" : task?.kind === "intervention" ? "reduced" : "allowed", is_transfer: Boolean(task && task.kind !== "diagnostic" && task.question_ids[task.question_ids.length - 1] === selected.ID) });
+  }
 
   if (url === "/api/classrooms" && method === "get") return response(config, state.classrooms);
   if (url === "/api/classrooms" && method === "post") {
@@ -243,7 +279,17 @@ export const demoAdapter: AxiosAdapter = async config => {
   }
   if (url === "/api/classrooms/join" && method === "post") return response(config, { name: "2026级统计学1班" });
   if (url === "/api/assignments/mine") return response(config, studentTasks);
+  const assignmentDetailMatch = url.match(/^\/api\/assignments\/(\d+)$/);
+  if (assignmentDetailMatch && method === "get") {
+    const task = studentTasks.find(item => item.id === Number(assignmentDetailMatch[1]));
+    if (task) return response(config, { ...task, hint_policy: task.kind === "retest" ? "blocked" : task.kind === "intervention" ? "reduced" : "allowed", transfer_question_id: task.kind === "diagnostic" ? undefined : task.question_ids[task.question_ids.length - 1], attempted_question_ids: task.question_ids.slice(0, task.attempted_questions), questions: task.question_ids.map(id => questions.find(item => item.ID === id)).filter(Boolean) });
+  }
   if (/^\/api\/classrooms\/\d+\/radar$/.test(url)) return response(config, { ...radar, classroom: state.classrooms.find(item => item.id === Number(url.split("/")[3])) || radar.classroom });
+  if (/^\/api\/classrooms\/\d+\/interventions\/preview$/.test(url)) {
+    const values = body(config);
+    const tasks = radar.groups.map((group, index) => { const ids = index === 0 ? ["P000001", "P000082"] : index === 1 ? ["P000082", "P000206"] : ["P000206", "P000737"]; const kind = group.type === "transfer_ready" ? "retest" : "intervention"; return { group_key: group.key, group_label: group.label, focus: group.focus, strategy: group.strategy, student_ids: group.student_ids, question_ids: ids, kind, title: `${group.label} · ${group.focus}`, description: `${group.strategy}最后一道题作为无提示迁移验证。`, hint_policy: kind === "retest" ? "blocked" : "reduced", transfer_question_id: ids[ids.length - 1], due_at: null }; });
+    return response(config, { source_assignment_id: values.source_assignment_id, tasks, groups: tasks.length, students: tasks.reduce((sum, item) => sum + item.student_ids.length, 0) });
+  }
   if (/^\/api\/classrooms\/\d+\/interventions$/.test(url)) return response(config, { groups: 3, students: 9 }, 201);
   if (/^\/api\/classrooms\/\d+\/join-code$/.test(url)) return response(config, { join_code: "NEW731A" });
   if (/^\/api\/classrooms\/\d+\/assignments$/.test(url)) return response(config, { id: Date.now(), status: "published" }, 201);
@@ -263,6 +309,13 @@ export const demoAdapter: AxiosAdapter = async config => {
     state.plans = state.plans.filter(item => item.id !== Number(planMatch[1]));
     saveState(state);
     return response(config, { ok: true });
+  }
+  if (planMatch && method === "put") {
+    const values = body(config);
+    const index = state.plans.findIndex(item => item.id === Number(planMatch[1]));
+    if (index >= 0) state.plans[index] = { ...state.plans[index], ...(values.content !== undefined ? { content: String(values.content) } : {}), ...(values.student_content !== undefined ? { student_content: String(values.student_content) } : {}) };
+    saveState(state);
+    return response(config, state.plans[index] || { ok: true });
   }
   if (planMatch) return response(config, { ok: true });
 

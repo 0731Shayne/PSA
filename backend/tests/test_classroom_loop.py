@@ -111,9 +111,24 @@ async def test_classroom_assignment_radar_and_intervention_loop(api, monkeypatch
     assert radar["summary"]["attempts"] == 3
     assert radar["groups"]
 
+    assignments_before_preview = len(radar["assignments"])
+    preview_response = await client.post(
+        f"/api/classrooms/{classroom['id']}/interventions/preview",
+        json={"source_assignment_id": assignment["id"]},
+        headers=teacher_headers,
+    )
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["tasks"]
+    assert all(task["student_ids"] and task["question_ids"] for task in preview["tasks"])
+    radar_after_preview = (
+        await client.get(f"/api/classrooms/{classroom['id']}/radar", headers=teacher_headers)
+    ).json()
+    assert len(radar_after_preview["assignments"]) == assignments_before_preview
+
     intervention_response = await client.post(
         f"/api/classrooms/{classroom['id']}/interventions",
-        json={"source_assignment_id": assignment["id"]},
+        json={"source_assignment_id": assignment["id"], "tasks": preview["tasks"]},
         headers=teacher_headers,
     )
     assert intervention_response.status_code == 200
@@ -254,6 +269,197 @@ async def test_teaching_package_has_teacher_student_and_publishable_versions(api
     stored = await client.get("/api/question-bank/teaching-plans", headers=teacher_headers)
     assert stored.status_code == 200
     assert stored.json()[0]["student_content"] == package["student_content"]
+
+    updated = await client.put(
+        f"/api/question-bank/teaching-plans/{package['id']}",
+        json={"student_content": package["student_content"] + "\n\n## 学生补充任务\n\n写出你的理由。"},
+        headers=teacher_headers,
+    )
+    assert updated.status_code == 200
+    assert "学生补充任务" in updated.json()["student_content"]
+
+
+async def test_task_evidence_uses_server_hints_scoped_answers_and_soft_deadlines(api, monkeypatch):
+    client, teacher_token, student_token = api
+    teacher_headers = {"Authorization": f"Bearer {teacher_token}"}
+    student_headers = {"Authorization": f"Bearer {student_token}"}
+
+    async def unavailable(*_args, **_kwargs):
+        raise RuntimeError("model unavailable in test")
+
+    monkeypatch.setattr(LLMClient, "chat", unavailable)
+    monkeypatch.setattr(LLMClient, "chat_json", unavailable)
+
+    self_study = await client.post(
+        "/api/question-bank/questions/P000001/attempts",
+        json={"answer": get_question("P000001")["answer"]},
+        headers=student_headers,
+    )
+    assert self_study.status_code == 200
+
+    classroom = (
+        await client.post("/api/classrooms", json={"name": "可信证据验证班"}, headers=teacher_headers)
+    ).json()
+    await client.post(
+        "/api/classrooms/join",
+        json={"join_code": classroom["join_code"]},
+        headers=student_headers,
+    )
+    assignment = (
+        await client.post(
+            f"/api/classrooms/{classroom['id']}/assignments",
+            json={
+                "topic": "条件概率",
+                "question_ids": ["P000001", "P000082"],
+                "count": 2,
+                "kind": "intervention",
+                "hint_policy": "reduced",
+                "transfer_question_id": "P000082",
+            },
+            headers=teacher_headers,
+        )
+    ).json()
+
+    scoped_detail = await client.get(
+        "/api/question-bank/questions/P000001",
+        params={"assignment_id": assignment["id"]},
+        headers=student_headers,
+    )
+    assert scoped_detail.status_code == 200
+    assert scoped_detail.json()["can_reveal"] is False
+    scoped_answer = await client.get(
+        "/api/question-bank/questions/P000001/answer",
+        params={"assignment_id": assignment["id"]},
+        headers=student_headers,
+    )
+    assert scoped_answer.status_code == 403
+
+    hint = await client.post(
+        "/api/question-bank/questions/P000001/hint",
+        json={"assignment_id": assignment["id"]},
+        headers=student_headers,
+    )
+    assert hint.status_code == 200
+    first_attempt = await client.post(
+        "/api/question-bank/questions/P000001/attempts",
+        json={
+            "answer": get_question("P000001")["answer"],
+            "assignment_id": assignment["id"],
+            "hint_count": 0,
+        },
+        headers=student_headers,
+    )
+    assert first_attempt.status_code == 200
+    assert first_attempt.json()["hint_count"] == 1
+
+    blocked_hint = await client.post(
+        "/api/question-bank/questions/P000082/hint",
+        json={"assignment_id": assignment["id"]},
+        headers=student_headers,
+    )
+    assert blocked_hint.status_code == 409
+    transfer_attempt = await client.post(
+        "/api/question-bank/questions/P000082/attempts",
+        json={
+            "answer": get_question("P000082")["answer"],
+            "assignment_id": assignment["id"],
+            "hint_count": 99,
+        },
+        headers=student_headers,
+    )
+    assert transfer_attempt.status_code == 200
+    assert transfer_attempt.json()["hint_count"] == 0
+    radar = (
+        await client.get(f"/api/classrooms/{classroom['id']}/radar", headers=teacher_headers)
+    ).json()
+    assert radar["summary"]["independent_transfer"] == 1
+
+    late_assignment = (
+        await client.post(
+            f"/api/classrooms/{classroom['id']}/assignments",
+            json={
+                "topic": "随机变量",
+                "question_ids": ["P000311"],
+                "count": 1,
+                "due_at": "2020-01-01T00:00:00Z",
+            },
+            headers=teacher_headers,
+        )
+    ).json()
+    late_attempt = await client.post(
+        "/api/question-bank/questions/P000311/attempts",
+        json={"answer": get_question("P000311")["answer"], "assignment_id": late_assignment["id"]},
+        headers=student_headers,
+    )
+    assert late_attempt.status_code == 200
+    assert late_attempt.json()["submitted_late"] is True
+    late_radar = (
+        await client.get(f"/api/classrooms/{classroom['id']}/radar", headers=teacher_headers)
+    ).json()
+    late_task = next(item for item in late_radar["assignments"] if item["id"] == late_assignment["id"])
+    assert late_task["late_submission_count"] == 1
+
+
+async def test_password_change_revokes_existing_tokens(api):
+    client, _teacher_token, _student_token = api
+    registered = await client.post(
+        "/api/auth/register",
+        json={"username": "session-student", "password": "old-password-123", "name": "会话学生"},
+    )
+    assert registered.status_code == 200
+    user_id = registered.json()["user"]["id"]
+    old_token = create_token(user_id, 0)
+
+    changed = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "old-password-123", "new_password": "new-password-456"},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["user"]["must_change_password"] is False
+    assert (await client.get("/api/auth/me")).status_code == 200
+    revoked = await client.get(
+        "/api/auth/me", headers={"Authorization": f"Bearer {old_token}"}
+    )
+    assert revoked.status_code == 401
+
+
+async def test_experiment_history_updates_learning_path_and_can_be_deleted(api):
+    client, _teacher_token, student_token = api
+    headers = {"Authorization": f"Bearer {student_token}"}
+    bayes_question = next(row for row in load_questions() if "贝叶斯公式" in row["keypoint"])
+    for _ in range(2):
+        attempt = await client.post(
+            f"/api/question-bank/questions/{bayes_question['ID']}/attempts",
+            json={"answer": "需要重新检查"},
+            headers=headers,
+        )
+        assert attempt.status_code == 200
+    saved = await client.post(
+        "/api/question-bank/experiments/runs",
+        json={
+            "experiment_id": "bayes",
+            "parameters": {"prior": 0.1, "sensitivity": 0.9, "specificity": 0.9},
+            "result_summary": "后验概率随先验率变化",
+            "observation": "先验率越低，阳性结果越需要谨慎解释。",
+        },
+        headers=headers,
+    )
+    assert saved.status_code == 200
+    history = await client.get("/api/question-bank/experiments/runs", headers=headers)
+    assert history.status_code == 200
+    assert history.json()[0]["parameters"]["prior"] == 0.1
+
+    profile = await client.get("/api/question-bank/learning-profile", headers=headers)
+    assert profile.status_code == 200
+    bayes_steps = [item for item in profile.json()["path"] if item.get("experiment_id") == "bayes"]
+    assert bayes_steps
+    assert all(item["experiment_completed"] is True for item in bayes_steps)
+
+    deleted = await client.delete(
+        f"/api/question-bank/experiments/runs/{saved.json()['id']}", headers=headers
+    )
+    assert deleted.status_code == 200
+    assert (await client.get("/api/question-bank/experiments/runs", headers=headers)).json() == []
 
 
 async def test_answer_reveal_requires_a_student_attempt(api, monkeypatch):

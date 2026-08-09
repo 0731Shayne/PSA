@@ -19,6 +19,7 @@ from ..db.models import (
     ChatSession,
     Classroom,
     ExperimentRecord,
+    HintEvent,
     LearningAssignment,
     QuestionAttempt,
     TeachingPlan,
@@ -67,6 +68,7 @@ MATH_MARKDOWN_RULE = (
 class HintRequest(BaseModel):
     answer: str = Field(default="", max_length=2000)
     reasoning: str = Field(default="", max_length=5000)
+    assignment_id: int | None = Field(default=None, gt=0)
 
 
 class ChatSessionCreateRequest(BaseModel):
@@ -79,6 +81,8 @@ class AttemptRequest(BaseModel):
     input_mode: Literal["formula", "reasoning", "image"] = "formula"
     image_name: str | None = Field(default=None, max_length=255)
     image_data_url: str = Field(default="", max_length=3_000_000)
+    # Retained for backwards-compatible clients; the server derives the
+    # authoritative count from HintEvent records.
     hint_count: int = Field(default=0, ge=0, le=99)
     assignment_id: int | None = Field(default=None, gt=0)
 
@@ -100,7 +104,8 @@ class ExperimentRunRequest(BaseModel):
 
 class TeachingPlanUpdateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=160)
-    content: str = Field(min_length=1, max_length=80000)
+    content: str | None = Field(default=None, max_length=80000)
+    student_content: str | None = Field(default=None, max_length=80000)
 
 
 class TeachingPlanCreateRequest(BaseModel):
@@ -115,6 +120,63 @@ class TeachingPlanCreateRequest(BaseModel):
 
 def _is_teacher(user: User) -> bool:
     return user.role == "teacher"
+
+
+async def _pending_assignment_for_question(
+    db: AsyncSession,
+    user_id: int,
+    question_id: str,
+) -> LearningAssignment | None:
+    return (
+        await db.execute(
+            select(LearningAssignment)
+            .join(AssignmentRecipient, AssignmentRecipient.assignment_id == LearningAssignment.id)
+            .join(AssignmentItem, AssignmentItem.assignment_id == LearningAssignment.id)
+            .where(
+                AssignmentRecipient.student_id == user_id,
+                AssignmentRecipient.status == "assigned",
+                LearningAssignment.status == "published",
+                AssignmentItem.question_id == question_id,
+            )
+            .order_by(LearningAssignment.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _student_assignment_context(
+    db: AsyncSession,
+    user: User,
+    assignment_id: int,
+    question_id: str,
+) -> tuple[LearningAssignment, AssignmentRecipient, AssignmentItem]:
+    assignment = (
+        await db.execute(
+            select(LearningAssignment).where(
+                LearningAssignment.id == assignment_id,
+                LearningAssignment.status == "published",
+            )
+        )
+    ).scalar_one_or_none()
+    recipient = (
+        await db.execute(
+            select(AssignmentRecipient).where(
+                AssignmentRecipient.assignment_id == assignment_id,
+                AssignmentRecipient.student_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    item = (
+        await db.execute(
+            select(AssignmentItem).where(
+                AssignmentItem.assignment_id == assignment_id,
+                AssignmentItem.question_id == question_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if assignment is None or recipient is None or item is None:
+        raise HTTPException(status_code=403, detail="这道题不属于分配给你的当前任务")
+    return assignment, recipient, item
 
 
 def _context_text(rows: list[dict[str, Any]]) -> str:
@@ -380,7 +442,6 @@ async def learning_summary(
                     StoredChatMessage.role == "assistant",
                 )
                 .order_by(StoredChatMessage.id.desc())
-                .limit(100)
             )
         ).scalars().all()
     question_ids: set[str] = set()
@@ -400,7 +461,6 @@ async def learning_summary(
             select(QuestionAttempt)
             .where(QuestionAttempt.user_id == user.id)
             .order_by(QuestionAttempt.id.desc())
-            .limit(200)
         )
     ).scalars().all()
     attempted_ids = {item.question_id for item in attempts}
@@ -444,12 +504,21 @@ async def learning_profile(
             select(QuestionAttempt)
             .where(QuestionAttempt.user_id == user.id)
             .order_by(QuestionAttempt.id.desc())
-            .limit(500)
         )
     ).scalars().all()
+    completed_experiments = set(
+        (
+            await db.execute(
+                select(ExperimentRecord.experiment_id)
+                .where(ExperimentRecord.user_id == user.id)
+                .distinct()
+            )
+        ).scalars().all()
+    )
     return build_learning_profile(
         load_questions(),
         [_attempt_analytics_payload(item) for item in attempts],
+        completed_experiments,
     )
 
 
@@ -474,7 +543,6 @@ async def teaching_insights(
         .join(Classroom, Classroom.id == LearningAssignment.classroom_id)
         .where(Classroom.teacher_id == user.id)
         .order_by(QuestionAttempt.id.desc())
-        .limit(2000)
     )
     if classroom_id is not None:
         classroom = (
@@ -522,6 +590,7 @@ async def list_questions(
 @router.get("/question-bank/questions/{question_id}")
 async def question_detail(
     question_id: str,
+    assignment_id: int | None = Query(default=None, gt=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -529,23 +598,30 @@ async def question_detail(
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
     teacher_view = _is_teacher(user)
+    assignment = None
+    if assignment_id is not None and not teacher_view:
+        assignment, _, _ = await _student_assignment_context(db, user, assignment_id, question_id)
+    elif not teacher_view:
+        assignment = await _pending_assignment_for_question(db, user.id, question_id)
+    attempt_filter = [QuestionAttempt.user_id == user.id, QuestionAttempt.question_id == question_id]
+    if assignment is not None:
+        attempt_filter.append(QuestionAttempt.assignment_id == assignment.id)
     can_reveal = teacher_view or bool(
-        await db.scalar(
-            select(QuestionAttempt.id).where(
-                QuestionAttempt.user_id == user.id,
-                QuestionAttempt.question_id == question_id,
-            ).limit(1)
-        )
+        await db.scalar(select(QuestionAttempt.id).where(*attempt_filter).limit(1))
     )
     return compact_question(row, include_answer=teacher_view) | {
         "teacher_view": teacher_view,
         "can_reveal": can_reveal,
+        "assignment_id": assignment.id if assignment else assignment_id,
+        "hint_policy": assignment.hint_policy if assignment else "allowed",
+        "is_transfer": bool(assignment and assignment.transfer_question_id == question_id),
     }
 
 
 @router.get("/question-bank/questions/{question_id}/answer")
 async def reveal_question_answer(
     question_id: str,
+    assignment_id: int | None = Query(default=None, gt=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -553,14 +629,20 @@ async def reveal_question_answer(
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
     if not _is_teacher(user):
+        assignment = None
+        if assignment_id is not None:
+            assignment, _, _ = await _student_assignment_context(db, user, assignment_id, question_id)
+        else:
+            assignment = await _pending_assignment_for_question(db, user.id, question_id)
+        attempt_filter = [QuestionAttempt.user_id == user.id, QuestionAttempt.question_id == question_id]
+        if assignment is not None:
+            attempt_filter.append(QuestionAttempt.assignment_id == assignment.id)
         attempted = await db.scalar(
-            select(QuestionAttempt.id).where(
-                QuestionAttempt.user_id == user.id,
-                QuestionAttempt.question_id == question_id,
-            ).limit(1)
+            select(QuestionAttempt.id).where(*attempt_filter).limit(1)
         )
         if not attempted:
-            raise HTTPException(status_code=403, detail="请先提交一次作答，再查看答案与解析")
+            detail = "请先完成当前任务中的这道题，再查看答案与解析" if assignment else "请先提交一次作答，再查看答案与解析"
+            raise HTTPException(status_code=403, detail=detail)
     return compact_question(row, include_answer=True) | {
         "teacher_view": _is_teacher(user),
         "can_reveal": True,
@@ -571,11 +653,22 @@ async def reveal_question_answer(
 async def question_hint(
     question_id: str,
     payload: HintRequest = Body(default=HintRequest()),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     row = get_question(question_id)
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
+    assignment = None
+    if not _is_teacher(user):
+        if payload.assignment_id is not None:
+            assignment, _, _ = await _student_assignment_context(db, user, payload.assignment_id, question_id)
+        else:
+            assignment = await _pending_assignment_for_question(db, user.id, question_id)
+        if assignment and (
+            assignment.hint_policy == "blocked" or assignment.transfer_question_id == question_id
+        ):
+            raise HTTPException(status_code=409, detail="这道题用于无提示独立验证，当前不能使用提示")
     answer = payload.answer.strip()
     reasoning = payload.reasoning.strip()
     prompt = (
@@ -593,6 +686,14 @@ async def question_hint(
     except Exception:
         keypoint = "、".join(row.get("keypoint") or [])
         hint = f"先明确这道题涉及的事件和已知条件，再判断应使用哪个公式。重点回顾：{keypoint}。"
+    db.add(
+        HintEvent(
+            user_id=user.id,
+            assignment_id=assignment.id if assignment else None,
+            question_id=question_id,
+        )
+    )
+    await db.commit()
     return {"hint": hint}
 
 
@@ -616,33 +717,9 @@ async def submit_question_attempt(
         raise HTTPException(status_code=400, detail="请填写答案、描述思路或上传手写过程")
     assignment_id = payload.assignment_id
     recipient = None
+    assignment = None
     if assignment_id is not None:
-        assignment = (
-            await db.execute(
-                select(LearningAssignment).where(
-                    LearningAssignment.id == assignment_id,
-                    LearningAssignment.status == "published",
-                )
-            )
-        ).scalar_one_or_none()
-        recipient = (
-            await db.execute(
-                select(AssignmentRecipient).where(
-                    AssignmentRecipient.assignment_id == assignment_id,
-                    AssignmentRecipient.student_id == user.id,
-                )
-            )
-        ).scalar_one_or_none()
-        assigned_item = (
-            await db.execute(
-                select(AssignmentItem).where(
-                    AssignmentItem.assignment_id == assignment_id,
-                    AssignmentItem.question_id == question_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if assignment is None or recipient is None or assigned_item is None:
-            raise HTTPException(status_code=403, detail="这道题不属于分配给你的当前任务")
+        assignment, recipient, _ = await _student_assignment_context(db, user, assignment_id, question_id)
     ocr_text = ""
     ocr_status = "not_requested"
     if image_data_url:
@@ -658,7 +735,29 @@ async def submit_question_attempt(
             # The original image is still saved so a transient OCR outage does
             # not discard the student's work or fabricate a diagnosis.
             ocr_status = "failed"
-    hint_count = payload.hint_count
+    previous_attempt_at = await db.scalar(
+        select(func.max(QuestionAttempt.created_at)).where(
+            QuestionAttempt.user_id == user.id,
+            QuestionAttempt.question_id == question_id,
+            (
+                QuestionAttempt.assignment_id == assignment_id
+                if assignment_id is not None
+                else QuestionAttempt.assignment_id.is_(None)
+            ),
+        )
+    )
+    hint_filters = [
+        HintEvent.user_id == user.id,
+        HintEvent.question_id == question_id,
+        (
+            HintEvent.assignment_id == assignment_id
+            if assignment_id is not None
+            else HintEvent.assignment_id.is_(None)
+        ),
+    ]
+    if previous_attempt_at is not None:
+        hint_filters.append(HintEvent.created_at > previous_attempt_at)
+    hint_count = int(await db.scalar(select(func.count(HintEvent.id)).where(*hint_filters)) or 0)
     input_mode = payload.input_mode
     prior_count = (
         await db.execute(
@@ -718,6 +817,14 @@ async def submit_question_attempt(
         elif error_type not in ALLOWED_ERROR_TYPES:
             error_type = "表达不完整"
         feedback = feedback[:2000]
+    submitted_late = False
+    if assignment and assignment.due_at:
+        due_at = assignment.due_at
+        submitted_late = (
+            datetime.now(timezone.utc) > due_at
+            if due_at.tzinfo is not None
+            else datetime.now() > due_at
+        )
     attempt = QuestionAttempt(
         user_id=user.id,
         assignment_id=assignment_id,
@@ -734,6 +841,7 @@ async def submit_question_attempt(
         feedback=feedback,
         error_type=error_type or None,
         hint_count=hint_count,
+        submitted_late=submitted_late,
         attempt_no=prior_count + 1,
     )
     db.add(attempt)
@@ -762,6 +870,7 @@ async def submit_question_attempt(
         "error_type": error_type or None,
         "attempt_no": attempt.attempt_no,
         "hint_count": hint_count,
+        "submitted_late": submitted_late,
         "ocr_text": ocr_text or None,
         "ocr_provider": "mineru" if image_data_url else None,
         "ocr_status": ocr_status if image_data_url else None,
@@ -791,6 +900,7 @@ async def list_question_attempts(
             "verdict": item.verdict,
             "error_type": item.error_type,
             "hint_count": item.hint_count,
+            "submitted_late": bool(item.submitted_late),
             "attempt_no": item.attempt_no,
             "created_at": item.created_at.isoformat() if item.created_at else None,
         }
@@ -831,7 +941,6 @@ async def list_experiment_runs(
             select(ExperimentRecord)
             .where(ExperimentRecord.user_id == user.id)
             .order_by(ExperimentRecord.id.desc())
-            .limit(100)
         )
     ).scalars().all()
     return [
@@ -845,6 +954,27 @@ async def list_experiment_runs(
         }
         for item in records
     ]
+
+
+@router.delete("/question-bank/experiments/runs/{record_id}")
+async def delete_experiment_run(
+    record_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    record = (
+        await db.execute(
+            select(ExperimentRecord).where(
+                ExperimentRecord.id == record_id,
+                ExperimentRecord.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="实验记录不存在")
+    await db.delete(record)
+    await db.commit()
+    return {"deleted": record_id}
 
 
 @router.post("/question-bank/assistant")
@@ -1110,14 +1240,26 @@ async def update_teaching_plan(
     ).scalar_one_or_none()
     if plan is None:
         raise HTTPException(status_code=404, detail="教学设计不存在")
-    content = payload.content.strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="教学设计内容不能为空")
-    plan.content = content
-    plan.title = (payload.title or plan.title).strip()
+    if payload.content is None and payload.student_content is None and payload.title is None:
+        raise HTTPException(status_code=400, detail="请至少提交一项要保存的内容")
+    if payload.content is not None:
+        content = payload.content.strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="教师版内容不能为空")
+        plan.content = content
+    if payload.student_content is not None:
+        student_content = payload.student_content.strip()
+        if not student_content:
+            raise HTTPException(status_code=400, detail="学生版内容不能为空")
+        plan.student_content = student_content
+    if payload.title is not None:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="教学设计标题不能为空")
+        plan.title = title
     plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"id": plan.id, "title": plan.title, "content": plan.content, "updated_at": plan.updated_at.isoformat()}
+    return _stored_plan_payload(plan)
 
 
 @router.delete("/question-bank/teaching-plans/{plan_id}")

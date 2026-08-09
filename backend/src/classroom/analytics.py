@@ -80,6 +80,7 @@ def build_classroom_radar(
             concept_evidence[mastery["name"]].append(mastery)
         if any(
             item.get("assignment_kind") in {"intervention", "retest"}
+            and item.get("is_transfer") is True
             and item.get("verdict") == "correct"
             and int(item.get("hint_count") or 0) == 0
             for item in evidence
