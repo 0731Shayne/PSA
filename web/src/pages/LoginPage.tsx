@@ -76,18 +76,12 @@ export default function LoginPage() {
           <div className="login-story-index"><span>PSA · 2026</span><span>教学版</span></div>
           <p className="login-eyebrow">为大学概率统计课程而设计</p>
           <h1>从题库出发，<br />把解题与教学讲清楚</h1>
-          <p className="login-intro">面向大学概率论与数理统计课程，为学生提供循序渐进的题目辅导，也为教师提供可编辑、可保存的课堂教学设计。</p>
+          <p className="login-intro">学生循序解题，教师沉淀课堂设计。每一步都来自课程题库与真实学习证据。</p>
           <DistributionFigure />
           <div className="login-features">
-            <Feature title="专属题库" detail="1007 道题及标准解析" icon={<DatabaseOutlined />} />
-            <Feature title="分步辅导" detail="提示、检查与完整讲解" icon={<CheckCircleOutlined />} />
-            <Feature title="教学设计" detail="生成、编辑与历史保存" icon={<ReadOutlined />} />
-          </div>
-          <div className="login-loop">
-            <p>完整教学闭环</p>
-            <ol>
-              {['理解概念', '尝试作答', '获得反馈', '实验验证'].map((item, index) => <li key={item}><span>{String(index + 1).padStart(2, '0')}</span><strong>{item}</strong></li>)}
-            </ol>
+            <Feature title="1007 道专属题目" icon={<DatabaseOutlined />} />
+            <Feature title="循序分步辅导" icon={<CheckCircleOutlined />} />
+            <Feature title="可编辑教学设计" icon={<ReadOutlined />} />
           </div>
         </section>
         <section className="login-entry">
@@ -144,8 +138,8 @@ export default function LoginPage() {
   );
 }
 
-function Feature({ title, detail, icon }: { title: string; detail: string; icon: React.ReactNode }) {
-  return <div className="login-feature"><span>{icon}</span><div><h3>{title}</h3><p>{detail}</p></div></div>;
+function Feature({ title, icon }: { title: string; icon: React.ReactNode }) {
+  return <div className="login-feature"><span>{icon}</span><h3>{title}</h3></div>;
 }
 
 function DistributionFigure() {
