@@ -57,8 +57,8 @@ export default function AccountSecurityPage() {
     }
   }
 
-  return <div className="mx-auto max-w-3xl">
-    <div className="mb-6"><h1 className="text-2xl font-bold text-slate-950">账号与安全</h1><p className="mt-1 text-base text-slate-600">管理密码和已登录设备。当前账号：{user.username}</p></div>
+  return <div className="course-page mx-auto max-w-3xl">
+    <div className="page-heading mb-6"><span className="page-index">ACCOUNT · SECURITY</span><h1 className="text-2xl font-bold text-slate-950">账号与安全</h1><p className="mt-1 text-base text-slate-600">管理密码和已登录设备。当前账号：{user.username}</p></div>
     {user.must_change_password && <Alert className="mb-5" type="warning" showIcon message="首次登录必须修改初始密码" description="修改完成后才能继续使用课程功能；旧密码和其他设备上的登录状态会立即失效。" />}
     <section className="border border-slate-200 bg-white p-6">
       <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900"><LockOutlined className="text-teal-700" />修改密码</h2>

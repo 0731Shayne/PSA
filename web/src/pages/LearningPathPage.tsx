@@ -91,12 +91,12 @@ export default function LearningPathPage() {
   const noEvidence = profile.evidence.questions === 0;
   const visibleMastery = showAll ? profile.mastery : profile.mastery.slice(0, 8);
 
-  return <div className="mx-auto max-w-7xl">
-    <header className="overflow-hidden rounded-2xl border border-[#d7e5dd] bg-[#edf4ef]">
+  return <div className="course-page learning-path-page mx-auto max-w-7xl">
+    <header className="learning-path-hero overflow-hidden rounded-2xl border border-[#d7e5dd] bg-[#edf4ef]">
       <div className="grid gap-8 px-6 py-8 sm:px-8 lg:grid-cols-[1fr_340px] lg:px-10 lg:py-10">
         <div className="max-w-3xl">
           <div className="mb-3 flex flex-wrap items-center gap-2"><Tag color="cyan" className="!m-0">{evidenceLabel[profile.summary.evidence_level]}</Tag><span className="text-sm text-slate-600">基于 {profile.evidence.questions} 道题、{profile.evidence.attempts} 次作答</span></div>
-          <h1 className="text-3xl font-black leading-tight text-slate-950">下一步，先学好“{profile.summary.next_focus}”</h1>
+          <span className="page-index">LEARNING ROUTE · EVIDENCE UPDATED</span><h1 className="text-3xl font-black leading-tight text-slate-950">下一步，先学好“{profile.summary.next_focus}”</h1>
           <p className="mt-3 max-w-2xl text-[15px] leading-7 text-slate-600">路径依据题库知识点、作答结果、错误类型和提示使用情况生成。每完成一组题，掌握度和后续顺序都会更新。</p>
           <Button className="!mt-6" type="primary" size="large" onClick={() => profile.path[0]?.question_ids[0] ? navigate(`/questions?query=${profile.path[0].question_ids[0]}&task=1`) : navigate("/questions")}>
             开始当前任务 <ArrowRightOutlined />

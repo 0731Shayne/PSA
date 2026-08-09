@@ -73,8 +73,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <button onClick={() => go("/dashboard")} className="brand-button" aria-label="返回学习工作台">
       <BrandMark />
       <span className="min-w-0 text-left">
-        <span className="block truncate text-base font-bold tracking-tight text-slate-900">概率统计教学助手</span>
-        <span className="block text-sm font-semibold text-slate-500">概率论与数理统计</span>
+        <span className="brand-title block truncate">概率统计教学助手</span>
+        <span className="brand-subtitle block">概率论与数理统计</span>
       </span>
     </button>
   );
@@ -85,16 +85,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <aside className="app-sidebar">
         <div className="px-5 py-6">{brand}</div>
         <div className="course-library-card mx-4 mb-4 rounded-2xl p-3.5">
-          <div className="text-sm font-bold text-teal-800">专属课程题库</div>
-          <p className="mt-1.5 text-sm leading-5 text-slate-600">1007 道概率统计题目与解析</p>
+          <div className="course-card-index">COURSE · 01</div>
+          <div className="course-card-title">专属课程题库</div>
+          <p>1007 道概率统计题目与解析</p>
         </div>
-        <p className="px-6 pb-2 pt-2 text-sm font-bold text-slate-500">课程空间</p>
+        <p className="sidebar-section-label px-6 pb-2 pt-2">课程空间 / CONTENTS</p>
         <Menu mode="inline" selectedKeys={[current.path]} items={menuItems} onClick={selectMenu} className="app-menu" />
         <div className="mt-auto p-4">
           <div className="study-tip rounded-2xl p-4">
-            <p className="text-sm font-bold text-teal-900">学习小提示</p>
-            <p className="mt-2 text-sm font-medium leading-6 tracking-[.01em] text-slate-600">先尝试自己作答，再选择提示，学习效果会更好。</p>
-            <button onClick={() => go("/tutor")} className="mt-3 flex items-center gap-1 text-sm font-bold text-teal-800">开始提问 <RightOutlined className="text-xs" /></button>
+            <p className="study-tip-label">课堂札记</p>
+            <p className="study-tip-copy">先尝试自己作答，再选择提示，学习效果会更好。</p>
+            <button onClick={() => go("/tutor")} className="study-tip-link">开始提问 <RightOutlined className="text-xs" /></button>
           </div>
         </div>
       </aside>
@@ -111,8 +112,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <div className="flex min-w-0 items-center gap-3">
             <Button className="!flex xl:!hidden" type="text" icon={<MenuOutlined />} onClick={() => setMobileOpen(true)} aria-label="打开导航" />
             <div className="min-w-0">
-              <div className="truncate text-base font-semibold text-slate-800">{teacher ? "教师工作空间" : "学生学习空间"}</div>
-              <div className="hidden text-sm text-slate-600 sm:block">{current.label} · 概率论与数理统计</div>
+              <div className="workspace-kicker">{teacher ? "教师工作空间" : "学生学习空间"}</div>
+              <div className="workspace-title">{current.label}</div>
             </div>
           </div>
           <Dropdown
@@ -121,8 +122,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             trigger={["click"]}
           >
             <button className="account-button" aria-label={`打开${user?.name || "用户"}的账号菜单`}>
-              <Avatar className="!bg-teal-100 !font-bold !text-teal-800">{user?.name?.[0] || "用"}</Avatar>
-              <span className="hidden text-left sm:block"><span className="block text-sm font-bold text-slate-800">{user?.name}</span><span className="block text-sm text-slate-500">{teacher ? "教师端" : "学生端"}</span></span>
+              <Avatar className="account-avatar">{user?.name?.[0] || "用"}</Avatar>
+              <span className="hidden text-left sm:block"><span className="account-name">{user?.name}</span><span className="account-role">{teacher ? "教师端" : "学生端"}</span></span>
             </button>
           </Dropdown>
         </header>

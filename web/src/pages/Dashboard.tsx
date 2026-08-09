@@ -31,41 +31,41 @@ export default function Dashboard() {
   const loading = !loadError && (!stats || (!teacher && !learning));
 
   return (
-    <div>
+    <div className="dashboard-page">
       {loadError && <Alert className="mb-5" type="error" showIcon message="暂时无法载入学习数据" description="请检查网络连接后重试；导航仍可使用，数据将在连接恢复后更新。" action={<Button size="small" onClick={() => setReloadKey(value => value + 1)}>重新加载</Button>} />}
 
-      <section className="relative grid overflow-hidden rounded-2xl border border-[#d7e5dd] bg-[#edf4ef] px-7 py-9 sm:px-9 lg:grid-cols-[1fr_360px] lg:gap-10 lg:px-12 lg:py-12">
-        <div className="relative max-w-3xl">
-          <p className="mb-4 flex items-center gap-2 text-sm font-semibold text-teal-800"><span className="h-2 w-2 rounded-full bg-teal-600" />你好，{user?.name}</p>
-          <h1 className="max-w-2xl text-3xl font-black leading-tight text-slate-950 lg:text-[40px]">{teacher ? "把知识点组织成一堂好课" : "从一道题开始，真正理解概率统计"}</h1>
-          <p className="mt-4 max-w-xl text-[15px] leading-7 text-slate-600">{teacher ? "从专属题库生成分层学习单、课堂检测与认知断层预警。" : "系统会根据作答、错误类型和提示使用情况，持续更新你的学习路径。"}</p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            <button onClick={() => navigate(teacher ? "/classrooms" : "/tasks")} className="rounded-xl bg-teal-700 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-teal-800 active:translate-y-px">{teacher ? "查看班级认知雷达" : "查看我的任务"} <ArrowRightOutlined className="ml-2" /></button>
-            <button onClick={() => navigate("/questions")} className="rounded-xl border border-[#c8dad1] bg-white/75 px-5 py-3 text-sm font-bold text-slate-700 transition hover:border-teal-500 hover:text-teal-800 active:translate-y-px">浏览课程题库</button>
+      <section className="dashboard-hero">
+        <div className="dashboard-hero-copy">
+          <p className="dashboard-eyebrow"><span>第 01 章</span> 你好，{user?.name}</p>
+          <h1>{teacher ? "把知识点组织成一堂好课" : "从一道题开始，真正理解概率统计"}</h1>
+          <p className="dashboard-intro">{teacher ? "从专属题库生成分层学习单、课堂检测与认知断层预警。" : "系统会根据作答、错误类型和提示使用情况，持续更新你的学习路径。"}</p>
+          <div className="dashboard-actions">
+            <button onClick={() => navigate(teacher ? "/classrooms" : "/tasks")} className="dashboard-primary-action">{teacher ? "查看班级认知雷达" : "查看我的任务"} <ArrowRightOutlined /></button>
+            <button onClick={() => navigate("/questions")} className="dashboard-secondary-action">浏览课程题库</button>
           </div>
         </div>
-        <div className="mt-10 hidden rounded-2xl border border-[#d2e2d9] bg-white/65 p-7 lg:mt-0 lg:block" aria-label="概率统计公式示例">
-          <p className="text-sm font-bold text-teal-800">今日公式</p>
-          <div className="mt-5 font-mono text-[28px] font-bold leading-relaxed text-slate-900">P(A|B)</div>
-          <div className="font-mono text-xl leading-relaxed text-teal-800">= P(B|A)P(A) / P(B)</div>
-          <p className="mt-5 text-sm leading-6 text-slate-600">贝叶斯公式把新的观测证据转化为对事件概率的更新。</p>
-          <button onClick={() => navigate("/questions?keypoint=贝叶斯公式")} className="mt-5 text-sm font-bold text-teal-800 hover:text-teal-950">查看相关题目 <ArrowRightOutlined className="ml-1" /></button>
+        <div className="dashboard-figure" aria-label="贝叶斯公式与概率曲线示意">
+          <div className="dashboard-figure-caption"><span>FIG. 01</span><span>条件概率</span></div>
+          <ProbabilitySketch />
+          <div className="dashboard-formula"><strong>P(A|B)</strong><span>= P(B|A)P(A) / P(B)</span></div>
+          <p>新的观测证据，会改变我们对事件概率的判断。</p>
+          <button onClick={() => navigate("/questions?keypoint=贝叶斯公式")}>查看相关题目 <ArrowRightOutlined /></button>
         </div>
       </section>
 
-      <section aria-label="学习概览" className="mt-6 grid overflow-hidden rounded-2xl border border-slate-200 bg-white md:grid-cols-3 md:divide-x md:divide-slate-200">
+      <section aria-label="学习概览" className="dashboard-ledger">
         {loading ? <div className="col-span-3 grid gap-5 p-6 md:grid-cols-3"><Skeleton active paragraph={{ rows: 2 }} /><Skeleton active paragraph={{ rows: 2 }} /><Skeleton active paragraph={{ rows: 2 }} /></div> : teacher ? <><Stat icon={<BookOutlined />} label="题库总量" value={stats?.total ?? "—"} note="覆盖概率论与数理统计" /><Stat icon={<BulbOutlined />} label="知识点" value={stats ? Object.keys(stats.keypoints).length : "—"} note="支持按考点精准检索" /><Stat icon={<ReadOutlined />} label="题型" value={stats ? Object.keys(stats.qtypes).length : "—"} note={stats ? Object.keys(stats.qtypes).slice(0, 3).join(" · ") : "等待数据恢复"} /></> : <><Stat icon={<MessageOutlined />} label="学习会话" value={learning?.sessions ?? "—"} note="累计保留的答疑会话" /><Stat icon={<BookOutlined />} label="已作答题目" value={learning?.attempted_questions ?? "—"} note={`其中 ${learning?.correct_questions ?? 0} 题已正确完成`} /><Stat icon={<BulbOutlined />} label="当前正确率" value={learning ? `${accuracy}%` : "—"} note={learning?.attempted_questions ? `基于 ${learning.attempted_questions} 道已作答题目` : "完成作答后开始统计"} /></>}
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_.75fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 lg:p-7">
+        <div className="editorial-panel">
           <div className="mb-4 flex items-center justify-between gap-4"><div><h2 className="text-lg font-extrabold text-slate-900">{teacher ? "热门知识点" : "我的学习焦点"}</h2><p className="mt-1 text-sm text-slate-500">{teacher ? "选择知识点查看相关题目" : "根据近期答疑引用自动归纳"}</p></div><Button type="link" onClick={() => navigate("/questions")}>全部题目</Button></div>
           {!teacher && learning?.focus_keypoints.length === 0 ? <div className="flex min-h-52 flex-col items-center justify-center border-t border-slate-100 text-center"><BulbOutlined className="text-2xl text-slate-400" /><p className="mt-3 text-sm font-bold text-slate-700">完成第一次答疑后生成学习焦点</p><Button className="mt-2" type="link" onClick={() => navigate("/tutor")}>现在开始</Button></div> : <div className="divide-y divide-slate-100 border-t border-slate-100">
-            {(teacher ? keypoints.map(([name, count]) => ({ name, count })) : learning?.focus_keypoints || []).map((item, index) => <button key={item.name} onClick={() => navigate(`/questions?keypoint=${encodeURIComponent(item.name)}`)} className="group flex w-full items-center gap-3 px-1 py-3.5 text-left transition hover:bg-teal-50/70"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-sm font-black text-teal-800">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700 group-hover:text-teal-900">{item.name}</span><span className="text-sm text-slate-500">{item.count} 次</span></button>)}
+            {(teacher ? keypoints.map(([name, count]) => ({ name, count })) : learning?.focus_keypoints || []).map((item, index) => <button key={item.name} onClick={() => navigate(`/questions?keypoint=${encodeURIComponent(item.name)}`)} className="focus-row group"><span className="focus-index">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700 group-hover:text-teal-900">{item.name}</span><span className="text-sm text-slate-500">{item.count} 次</span></button>)}
           </div>}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 lg:p-7">
+        <div className="editorial-panel">
           <h2 className="text-lg font-extrabold text-slate-900">快速开始</h2>
           <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
             <Quick icon={<MessageOutlined />} title="按题号问解析" desc="例如：请讲解 P000001" onClick={() => navigate("/tutor?prompt=请讲解 P000001")} />
@@ -84,9 +84,20 @@ export default function Dashboard() {
 }
 
 function Stat({ icon, label, value, note }: { icon: React.ReactNode; label: string; value: number | string; note: string }) {
-  return <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6 last:border-b-0 md:border-b-0"><div><p className="text-sm font-semibold text-slate-500">{label}</p><p className="mt-1.5 text-3xl font-black tracking-tight text-slate-900">{value}</p><p className="mt-1.5 text-sm text-slate-500">{note}</p></div><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-lg text-teal-800">{icon}</span></div>;
+  return <div className="dashboard-stat"><div><p className="dashboard-stat-label">{label}</p><p className="dashboard-stat-value">{value}</p><p className="dashboard-stat-note">{note}</p></div><span className="dashboard-stat-icon">{icon}</span></div>;
 }
 
 function Quick({ icon, title, desc, onClick }: { icon: React.ReactNode; title: string; desc: string; onClick: () => void }) {
-  return <button onClick={onClick} className="group flex w-full items-center gap-3 py-3.5 text-left transition hover:bg-teal-50/70"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-teal-800">{icon}</span><span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-800 group-hover:text-teal-950">{title}</span><span className="mt-0.5 block truncate text-sm text-slate-500 group-hover:text-teal-800">{desc}</span></span><ArrowRightOutlined className="text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-teal-700" /></button>;
+  return <button onClick={onClick} className="quick-row group"><span className="quick-icon">{icon}</span><span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-800 group-hover:text-teal-950">{title}</span><span className="mt-0.5 block truncate text-sm text-slate-500 group-hover:text-teal-800">{desc}</span></span><ArrowRightOutlined className="quick-arrow" /></button>;
+}
+
+function ProbabilitySketch() {
+  return <svg className="probability-sketch" viewBox="0 0 360 145" role="img" aria-label="概率密度曲线">
+    <path className="sketch-grid" d="M24 22v98h316M24 95h316M24 70h316M24 45h316M87 22v98M150 22v98M213 22v98M276 22v98" />
+    <path className="sketch-area" d="M25 118C58 117 91 111 117 92c28-21 33-61 69-65 40-5 45 56 78 72 22 11 50 17 75 19v2H25z" />
+    <path className="sketch-curve" d="M25 118C58 117 91 111 117 92c28-21 33-61 69-65 40-5 45 56 78 72 22 11 50 17 75 19" />
+    <path className="sketch-marker" d="M186 27v93" />
+    <circle cx="186" cy="27" r="4" />
+    <text x="194" y="21">μ</text><text x="322" y="137">x</text><text x="10" y="22">f(x)</text>
+  </svg>;
 }

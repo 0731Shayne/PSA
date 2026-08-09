@@ -41,27 +41,31 @@ export default function App() {
         locale={zhCN}
         theme={{
           token: {
-            colorPrimary: "#0f766e",
-            colorInfo: "#0f766e",
-            colorSuccess: "#16a34a",
-            colorWarning: "#d97706",
-            colorBgLayout: "#f6f7f3",
-            colorText: "#1e293b",
-            colorTextSecondary: "#64748b",
-            colorTextPlaceholder: "#64748b",
-            colorBorder: "#cbd5e1",
-            borderRadius: 12,
-            borderRadiusLG: 16,
+            colorPrimary: "#275b4b",
+            colorInfo: "#275b4b",
+            colorSuccess: "#47745b",
+            colorWarning: "#a66a32",
+            colorError: "#a84f3d",
+            colorBgLayout: "#f2eee4",
+            colorBgContainer: "#fffdf7",
+            colorText: "#202a27",
+            colorTextSecondary: "#68716d",
+            colorTextPlaceholder: "#7b827e",
+            colorBorder: "#d4cec1",
+            borderRadius: 7,
+            borderRadiusLG: 10,
             controlHeight: 40,
             fontSizeSM: 13,
             fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
           },
           components: {
-            Button: { fontWeight: 650, primaryShadow: "0 2px 4px rgba(15, 118, 110, 0.16)" },
+            Button: { fontWeight: 650, primaryShadow: "0 2px 0 rgba(23, 52, 43, 0.14)", defaultShadow: "none" },
             Card: { headerFontSize: 16 },
             Drawer: { paddingLG: 24 },
-            Menu: { itemBorderRadius: 12, itemHeight: 46, iconSize: 17 },
-            Segmented: { itemSelectedBg: "#ffffff" },
+            Menu: { itemBorderRadius: 4, itemHeight: 44, iconSize: 17 },
+            Segmented: { itemSelectedBg: "#fffdf7", trackBg: "#ebe6db" },
+            Table: { headerBg: "#f1ede3", headerColor: "#39433f" },
+            Modal: { contentBg: "#fffdf7", headerBg: "#fffdf7" },
           },
         }}
       >
@@ -69,7 +73,7 @@ export default function App() {
           <AppErrorBoundary>
             <AuthProvider>
               <ScrollToTop />
-              <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f6f7f3]" aria-live="polite"><Spin size="large" tip="正在进入课程空间…"><div className="h-16 w-52" /></Spin></div>}>
+              <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f2eee4]" aria-live="polite"><Spin size="large" tip="正在进入课程空间…"><div className="h-16 w-52" /></Spin></div>}>
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/dashboard" element={protectedPage(<Dashboard />)} />
