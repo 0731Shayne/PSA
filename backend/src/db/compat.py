@@ -22,6 +22,27 @@ async def ensure_local_sqlite_compatibility(connection: AsyncConnection) -> None
             return set()
         return {column["name"] for column in inspector.get_columns(table_name)}
 
+    user_columns = await connection.run_sync(table_columns, "users")
+    user_additions = {
+        "session_version": "INTEGER NOT NULL DEFAULT 0",
+        "must_change_password": "BOOLEAN NOT NULL DEFAULT 0",
+        "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+    }
+    for column_name, definition in user_additions.items():
+        if user_columns and column_name not in user_columns:
+            await connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {definition}"))
+
+    assignment_columns = await connection.run_sync(table_columns, "learning_assignments")
+    assignment_additions = {
+        "hint_policy": "VARCHAR(24) NOT NULL DEFAULT 'allowed'",
+        "transfer_question_id": "VARCHAR(16)",
+    }
+    for column_name, definition in assignment_additions.items():
+        if assignment_columns and column_name not in assignment_columns:
+            await connection.execute(
+                text(f"ALTER TABLE learning_assignments ADD COLUMN {column_name} {definition}")
+            )
+
     columns = await connection.run_sync(table_columns, "question_attempts")
     if not columns:
         return
@@ -39,6 +60,7 @@ async def ensure_local_sqlite_compatibility(connection: AsyncConnection) -> None
         "ocr_text": "TEXT",
         "ocr_provider": "VARCHAR(32)",
         "ocr_status": "VARCHAR(24)",
+        "submitted_late": "BOOLEAN NOT NULL DEFAULT 0",
     }
     for column_name, definition in ocr_additions.items():
         if column_name not in columns:

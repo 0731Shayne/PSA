@@ -68,3 +68,16 @@ def test_every_experiment_links_back_to_corpus_questions():
     assert len(catalog) == 8
     assert all(item["keypoints"] for item in catalog)
     assert all(item["question_ids"] for item in catalog)
+
+
+def test_saved_experiment_is_visible_on_learning_path():
+    row = _question_with("贝叶斯公式")
+    attempts = [
+        {"question_id": row["ID"], "verdict": "incorrect", "hint_count": 0, "attempt_no": 2},
+        {"question_id": row["ID"], "verdict": "partial", "hint_count": 1, "attempt_no": 1},
+    ]
+    profile = build_learning_profile(load_questions(), attempts, {"bayes"})
+    bayes_steps = [step for step in profile["path"] if step.get("experiment_id") == "bayes"]
+
+    assert bayes_steps
+    assert all(step["experiment_completed"] is True for step in bayes_steps)

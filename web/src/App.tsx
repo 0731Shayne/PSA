@@ -17,6 +17,8 @@ const LearningPathPage = lazy(() => import("./pages/LearningPathPage"));
 const ClassroomRadarPage = lazy(() => import("./pages/ClassroomRadarPage"));
 const MyTasksPage = lazy(() => import("./pages/MyTasksPage"));
 const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"));
+const TaskRunnerPage = lazy(() => import("./pages/TaskRunnerPage"));
+const AccountSecurityPage = lazy(() => import("./pages/AccountSecurityPage"));
 
 const protectedPage = (node: React.ReactNode) => (
   <ProtectedRoute><AppLayout>{node}</AppLayout></ProtectedRoute>
@@ -77,8 +79,10 @@ export default function App() {
                   <Route path="/learning-path" element={protectedPage(<LearningPathPage />)} />
                   <Route path="/classrooms" element={protectedPage(<ClassroomRadarPage />)} />
                   <Route path="/tasks" element={protectedPage(<MyTasksPage />)} />
+                  <Route path="/tasks/:assignmentId" element={protectedPage(<TaskRunnerPage />)} />
                   <Route path="/teaching" element={protectedPage(<TeachingStudio />)} />
                   <Route path="/knowledge" element={protectedPage(<KnowledgeBasePage />)} />
+                  <Route path="/account/security" element={protectedPage(<AccountSecurityPage />)} />
                   <Route path="*" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
               </Suspense>

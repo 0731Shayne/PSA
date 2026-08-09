@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -36,6 +36,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "false").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -49,9 +54,13 @@ def _dev_login_role() -> str:
     return role if role in {"student", "teacher"} else "teacher"
 
 
-def create_token(user_id: int) -> str:
+def create_token(user_id: int, session_version: int = 0) -> str:
     return jwt.encode(
-        {"sub": str(user_id), "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)},
+        {
+            "sub": str(user_id),
+            "ver": session_version,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS),
+        },
         SECRET_KEY,
         algorithm=ALGORITHM,
     )
@@ -70,6 +79,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     db: AsyncSession = Depends(get_db),
@@ -80,11 +90,22 @@ async def get_current_user(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = int(payload["sub"])
+        session_version = int(payload.get("ver", 0))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态无效") from exc
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用")
+    if session_version != int(user.session_version or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效，请重新登录")
+    if user.must_change_password and request.url.path not in {
+        "/api/auth/me",
+        "/api/auth/change-password",
+        "/api/auth/logout",
+    }:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="首次登录请先修改初始密码")
     return user
 
 
@@ -125,7 +146,7 @@ async def dev_login(response: Response, db: AsyncSession = Depends(get_db)):
         user.role = role
         await db.commit()
     await db.refresh(user)
-    token = create_token(user.id)
+    token = create_token(user.id, user.session_version)
     _set_session_cookie(response, token)
     return {"user": _user_payload(user)}
 
@@ -155,7 +176,7 @@ async def register(payload: RegisterRequest, response: Response, db: AsyncSessio
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    token = create_token(user.id)
+    token = create_token(user.id, user.session_version)
     _set_session_cookie(response, token)
     return {"user": _user_payload(user)}
 
@@ -167,7 +188,9 @@ async def login(payload: LoginRequest, response: Response, db: AsyncSession = De
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
     if user is None or not user.password_hash or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    token = create_token(user.id)
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号已停用，请联系部署管理员")
+    token = create_token(user.id, user.session_version)
     _set_session_cookie(response, token)
     return {"user": _user_payload(user)}
 
@@ -189,5 +212,45 @@ async def me(user: User = Depends(get_current_user)):
     return _user_payload(user)
 
 
+@router.post("/change-password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not user.password_hash or not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+    user.password_hash = hash_password(payload.new_password)
+    user.must_change_password = False
+    user.session_version = int(user.session_version or 0) + 1
+    await db.commit()
+    await db.refresh(user)
+    _set_session_cookie(response, create_token(user.id, user.session_version))
+    return {"user": _user_payload(user), "sessions_revoked": True}
+
+
+@router.post("/revoke-other-sessions")
+async def revoke_other_sessions(
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user.session_version = int(user.session_version or 0) + 1
+    await db.commit()
+    await db.refresh(user)
+    _set_session_cookie(response, create_token(user.id, user.session_version))
+    return {"user": _user_payload(user), "sessions_revoked": True}
+
+
 def _user_payload(user: User) -> dict:
-    return {"id": user.id, "name": user.name, "role": user.role, "avatar_url": user.avatar_url}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "name": user.name,
+        "role": user.role,
+        "avatar_url": user.avatar_url,
+        "must_change_password": bool(user.must_change_password),
+    }

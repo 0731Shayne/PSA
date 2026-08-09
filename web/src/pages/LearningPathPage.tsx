@@ -11,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
+import { MathMarkdown } from "@/components/MathMarkdown";
 
 interface Mastery {
   id: string;
@@ -43,6 +44,7 @@ interface PathStep {
   question_ids: string[];
   difficulty: string[];
   experiment_id?: string;
+  experiment_completed?: boolean;
   completed: boolean;
 }
 
@@ -117,8 +119,8 @@ export default function LearningPathPage() {
             <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black ${step.completed ? "bg-emerald-100 text-emerald-800" : step.type === "experiment" ? "bg-sky-100 text-sky-800" : "bg-teal-50 text-teal-800"}`}>{step.completed ? <CheckCircleOutlined /> : step.order}</span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold text-slate-900">{step.title}</h3><Tag color={step.type === "review" ? "orange" : step.type === "experiment" ? "blue" : "cyan"}>{step.type === "review" ? "前置回补" : step.type === "experiment" ? "参数实验" : "分层练习"}</Tag></div>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{step.reason}</p>
-              <div className="mt-4 flex flex-wrap gap-2">{step.question_ids.map((id, index) => <Button key={id} size="small" onClick={() => navigate(`/questions?query=${id}&task=1`)}>{id}{step.difficulty[index] ? ` · ${step.difficulty[index]}` : ""}</Button>)}{step.experiment_id && <Button size="small" type="primary" ghost icon={<ExperimentOutlined />} onClick={() => navigate(`/experiments?id=${step.experiment_id}`)}>打开关联实验</Button>}</div>
+              <div className="mt-2 max-w-2xl text-sm leading-6 text-slate-600"><MathMarkdown>{step.reason}</MathMarkdown></div>
+              <div className="mt-4 flex flex-wrap gap-2">{step.question_ids.map((id, index) => <Button key={id} size="small" onClick={() => navigate(`/questions?query=${id}&task=1`)}>{id}{step.difficulty[index] ? ` · ${step.difficulty[index]}` : ""}</Button>)}{step.experiment_id && <Button size="small" type={step.experiment_completed ? "default" : "primary"} ghost={!step.experiment_completed} icon={step.experiment_completed ? <CheckCircleOutlined /> : <ExperimentOutlined />} onClick={() => navigate(`/experiments?id=${step.experiment_id}`)}>{step.experiment_completed ? "实验已记录 · 再次打开" : "打开关联实验"}</Button>}</div>
             </div>
           </li>)}
         </ol>
@@ -128,8 +130,8 @@ export default function LearningPathPage() {
         <div className="border-b border-slate-200 px-6 py-5"><h2 id="warning-heading" className="flex items-center gap-2 text-lg font-extrabold text-slate-900"><WarningOutlined className="text-amber-600" />认知断层预警</h2><p className="mt-1 text-sm text-slate-600">只在至少有两次相关作答时发出，避免凭一次失误下结论。</p></div>
         {profile.alerts.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description={noEvidence ? "完成诊断题后生成预警" : "暂未发现需要预警的知识断层"} /> : <div className="divide-y divide-slate-100">{profile.alerts.map(alert => <article key={`${alert.keypoint}-${alert.title}`} className="px-6 py-5">
           <div className="flex items-start justify-between gap-3"><h3 className="font-extrabold text-slate-900">{alert.title}</h3><Tag color={alert.severity === "high" ? "red" : alert.severity === "medium" ? "orange" : "blue"}>{alert.severity === "high" ? "高风险" : alert.severity === "medium" ? "需关注" : "提示"}</Tag></div>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{alert.message}</p>
-          <div className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950"><span className="font-bold">建议：</span>{alert.recommendation}</div>
+          <div className="mt-2 text-sm leading-6 text-slate-600"><MathMarkdown>{alert.message}</MathMarkdown></div>
+          <div className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950"><span className="font-bold">建议：</span><MathMarkdown>{alert.recommendation}</MathMarkdown></div>
           <p className="mt-3 text-sm text-slate-500">证据：{alert.evidence.questions} 道题 · {alert.evidence.attempts} 次作答 · 使用 {alert.evidence.hints} 次提示</p>
         </article>)}</div>}
       </section>

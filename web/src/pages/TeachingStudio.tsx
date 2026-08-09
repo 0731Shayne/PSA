@@ -1,14 +1,15 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Empty, Form, Input, InputNumber, Popconfirm, Result, Segmented, Select, Skeleton, Tag, message } from "antd";
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Result, Segmented, Select, Skeleton, Tag, message } from "antd";
 import { BankOutlined, CheckCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileTextOutlined, HistoryOutlined, PrinterOutlined, ReadOutlined, SafetyCertificateOutlined, SaveOutlined, SendOutlined, TeamOutlined, WarningOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { MathMarkdown, markdownHeadingId } from "@/components/MathMarkdown";
 import { useAuth } from "@/contexts/AuthContext";
+import { setUnsavedChanges } from "@/utils/unsavedChanges";
 
 type LayerKey = "foundation" | "progress" | "transfer";
-type ViewKey = "teacher" | "student" | "insights" | "edit";
+type ViewKey = "teacher" | "student" | "insights" | "edit" | "edit_student";
 
 interface PackageLayer {
   label: string;
@@ -105,6 +106,7 @@ export default function TeachingStudio() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [active, setActive] = useState<Plan | null>(null);
   const [content, setContent] = useState("");
+  const [studentContent, setStudentContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -117,7 +119,9 @@ export default function TeachingStudio() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [publishClassroomId, setPublishClassroomId] = useState<number>();
   const [publishSection, setPublishSection] = useState("diagnostic");
+  const [showPublishPreview, setShowPublishPreview] = useState(false);
   const previewContent = useDeferredValue(content);
+  const previewStudentContent = useDeferredValue(studentContent);
 
   useEffect(() => {
     if (!teacher) return;
@@ -135,9 +139,25 @@ export default function TeachingStudio() {
     const warn = (event: BeforeUnloadEvent) => {
       if (!dirty) return;
       event.preventDefault();
+      event.returnValue = "";
+    };
+    const warnBack = () => {
+      if (!dirty) return;
+      if (window.confirm("当前教学包有尚未保存的修改，确定离开吗？")) {
+        setUnsavedChanges(false);
+        setDirty(false);
+      } else {
+        window.history.forward();
+      }
     };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    window.addEventListener("popstate", warnBack);
+    return () => { window.removeEventListener("beforeunload", warn); window.removeEventListener("popstate", warnBack); };
+  }, [dirty]);
+
+  useEffect(() => {
+    setUnsavedChanges(dirty);
+    return () => setUnsavedChanges(false);
   }, [dirty]);
 
   const selectedClassroom = useMemo(
@@ -145,9 +165,9 @@ export default function TeachingStudio() {
     [classrooms, publishClassroomId],
   );
   const outline = useMemo(() => {
-    const source = view === "student" ? active?.student_content || "" : content;
+    const source = view === "student" || view === "edit_student" ? studentContent : content;
     return [...source.matchAll(/^##\s+(.+)$/gm)].map(match => match[1].trim()).slice(0, 12);
-  }, [active?.student_content, content, view]);
+  }, [content, studentContent, view]);
 
   if (!teacher) return <Result status="403" title="教师专属功能" subTitle="学生账号可以使用智能答疑和题库练习。" />;
 
@@ -158,6 +178,7 @@ export default function TeachingStudio() {
     }
     setActive(plan);
     setContent(plan.content);
+    setStudentContent(plan.student_content);
     setView("teacher");
     setDirty(false);
     setInsights(null);
@@ -204,6 +225,7 @@ export default function TeachingStudio() {
       const response = await apiClient.post<Plan>("/api/question-bank/teaching-plan", values);
       setActive(response.data);
       setContent(response.data.content);
+      setStudentContent(response.data.student_content);
       setView("teacher");
       setDirty(false);
       setInsights(response.data.insights || null);
@@ -225,11 +247,11 @@ export default function TeachingStudio() {
     if (!active) return;
     setSaving(true);
     try {
-      await apiClient.put(`/api/question-bank/teaching-plans/${active.id}`, { title: active.title, content });
-      setActive({ ...active, content });
-      setPlans(items => items.map(item => item.id === active.id ? { ...item, content } : item));
+      await apiClient.put(`/api/question-bank/teaching-plans/${active.id}`, { title: active.title, content, student_content: studentContent });
+      setActive({ ...active, content, student_content: studentContent });
+      setPlans(items => items.map(item => item.id === active.id ? { ...item, content, student_content: studentContent } : item));
       setDirty(false);
-      message.success("教师执行版修改已保存");
+      message.success("教师执行版和学生学习单已保存");
     } catch {
       message.error("保存失败，当前编辑内容仍保留在页面中");
     } finally {
@@ -243,6 +265,7 @@ export default function TeachingStudio() {
       if (active?.id === plan.id) {
         setActive(null);
         setContent("");
+        setStudentContent("");
         setDirty(false);
         setInsights(null);
       }
@@ -256,7 +279,7 @@ export default function TeachingStudio() {
   function download() {
     if (!active) return;
     const studentVersion = view === "student";
-    const downloadContent = studentVersion ? active.student_content : content;
+    const downloadContent = studentVersion ? studentContent : content;
     const blob = new Blob([downloadContent], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -281,7 +304,7 @@ export default function TeachingStudio() {
     return plan.package.layers[publishSection as LayerKey]?.question_ids || [];
   }
 
-  async function publish() {
+  function preparePublish() {
     if (!active || !publishClassroomId) {
       message.warning("请先选择要发布的班级");
       return;
@@ -291,6 +314,12 @@ export default function TeachingStudio() {
       message.warning("当前层级没有可发布的题目，请重新生成或指定题号");
       return;
     }
+    setShowPublishPreview(true);
+  }
+
+  async function publish() {
+    if (!active || !publishClassroomId) return;
+    const questionIds = publishQuestionIds(active);
     const sectionLabel = publishSections.find(item => item.value === publishSection)?.label || "课堂任务";
     setPublishing(true);
     try {
@@ -300,9 +329,12 @@ export default function TeachingStudio() {
         question_ids: questionIds,
         count: questionIds.length,
         kind: publishSection === "exit" ? "retest" : publishSection === "diagnostic" ? "diagnostic" : "intervention",
+        hint_policy: publishSection === "exit" ? "blocked" : publishSection === "diagnostic" ? "allowed" : "reduced",
+        transfer_question_id: publishSection === "diagnostic" ? undefined : questionIds[questionIds.length - 1],
         description: `来自教学包“${active.title}”。完成后作答证据将回写班级认知雷达。`,
       });
       message.success(`已向“${selectedClassroom?.name || "所选班级"}”发布 ${questionIds.length} 道题`);
+      setShowPublishPreview(false);
     } catch (error) {
       message.error(errorDetail(error, "发布失败，请检查班级成员和题目配置"));
     } finally {
@@ -392,6 +424,7 @@ export default function TeachingStudio() {
                 { label: "学生学习单", value: "student", icon: <FileTextOutlined /> },
                 { label: "证据与风险", value: "insights", icon: <SafetyCertificateOutlined /> },
                 { label: "编辑教师版", value: "edit", icon: <EditOutlined /> },
+                { label: "编辑学生版", value: "edit_student", icon: <EditOutlined /> },
               ]} />
             </div>
           </div>
@@ -402,32 +435,32 @@ export default function TeachingStudio() {
               <Select aria-label="发布班级" className="min-w-0 flex-1" value={publishClassroomId} onChange={setPublishClassroomId} placeholder="选择班级" options={classrooms.map(item => ({ value: item.id, label: item.name }))} />
               <Select aria-label="发布教学包层级" className="min-w-32" value={publishSection} onChange={setPublishSection} options={publishSections} />
             </div>
-            <Button type="primary" loading={publishing} disabled={!publishClassroomId} onClick={publish} icon={<TeamOutlined />}>发布任务</Button>
+            <Button type="primary" loading={publishing} disabled={!publishClassroomId} onClick={preparePublish} icon={<TeamOutlined />}>预览后发布</Button>
           </section>
 
           <div className="px-6 py-7 lg:px-9 lg:py-8">
-            {view === "edit" ? <div>
+            {view === "edit" || view === "edit_student" ? <div>
               <Alert className="mb-5" type="info" showIcon message="左侧编辑 Markdown 源码，右侧实时查看排版结果" description="行内公式可用 $...$，独立公式可用 $$...$$；预览会自动兼容从题库或智能答疑导入的旧式公式分隔符。" />
               <div className="grid gap-5 xl:grid-cols-2">
                 <section aria-labelledby="markdown-source-heading">
-                  <div className="mb-3 flex items-center justify-between gap-3"><h3 id="markdown-source-heading" className="font-extrabold text-slate-800">Markdown 源码</h3><Tag>可编辑</Tag></div>
-                  <Input.TextArea aria-label="编辑教师执行版内容" value={content} onChange={event => { setContent(event.target.value); setDirty(event.target.value !== active.content); }} autoSize={{ minRows: 28 }} maxLength={80000} className="!font-mono !text-sm !leading-7" />
+                  <div className="mb-3 flex items-center justify-between gap-3"><h3 id="markdown-source-heading" className="font-extrabold text-slate-800">{view === "edit_student" ? "学生学习单" : "教师执行版"} Markdown 源码</h3><Tag>可编辑</Tag></div>
+                  <Input.TextArea aria-label={view === "edit_student" ? "编辑学生学习单内容" : "编辑教师执行版内容"} value={view === "edit_student" ? studentContent : content} onChange={event => { if (view === "edit_student") setStudentContent(event.target.value); else setContent(event.target.value); setDirty(view === "edit_student" ? event.target.value !== active.student_content || content !== active.content : event.target.value !== active.content || studentContent !== active.student_content); }} autoSize={{ minRows: 28 }} maxLength={80000} className="!font-mono !text-sm !leading-7" />
                 </section>
                 <section aria-labelledby="formula-preview-heading" aria-busy={previewContent !== content} className="min-w-0 rounded-2xl border border-slate-200 bg-white">
-                  <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-t-2xl border-b border-slate-200 bg-slate-50/95 px-5 py-3 backdrop-blur"><h3 id="formula-preview-heading" className="font-extrabold text-slate-800">公式与排版预览</h3><Tag color={previewContent === content ? "success" : "processing"}>{previewContent === content ? "已同步" : "更新中"}</Tag></div>
-                  <div className="teaching-markdown max-h-[72vh] overflow-auto p-5 text-[15px] leading-8 text-slate-700"><MathMarkdown>{previewContent}</MathMarkdown></div>
+                  <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-t-2xl border-b border-slate-200 bg-slate-50/95 px-5 py-3 backdrop-blur"><h3 id="formula-preview-heading" className="font-extrabold text-slate-800">公式与排版预览</h3><Tag color={(view === "edit_student" ? previewStudentContent === studentContent : previewContent === content) ? "success" : "processing"}>{(view === "edit_student" ? previewStudentContent === studentContent : previewContent === content) ? "已同步" : "更新中"}</Tag></div>
+                  <div className="teaching-markdown max-h-[72vh] overflow-auto p-5 text-[15px] leading-8 text-slate-700"><MathMarkdown>{view === "edit_student" ? previewStudentContent : previewContent}</MathMarkdown></div>
                 </section>
               </div>
             </div> : view === "insights" ? <InsightsPanel data={insights} packageData={active.package} loading={insightsLoading} onRetry={() => loadInsights(active)} /> : <>
               {view === "student" && <Alert className="mb-6" type="info" showIcon message="这是可直接发给学生的无答案版本" description="任务路径使用中性名称，不展示教师答案、讲评依据或班级风险判断。" />}
               {outline.length > 1 && <nav className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-label="教学包目录"><p className="text-sm font-extrabold text-slate-800">快速跳转</p><div className="mt-3 flex flex-wrap gap-2">{outline.map(heading => <a key={heading} href={`#${markdownHeadingId(heading)}`} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-teal-800 transition hover:border-teal-300 hover:bg-teal-50">{heading}</a>)}</div></nav>}
-              <div className="teaching-markdown prose max-w-none text-[15px] leading-8 text-slate-700"><MathMarkdown>{view === "student" ? active.student_content : content}</MathMarkdown></div>
+              <div className="teaching-markdown prose max-w-none text-[15px] leading-8 text-slate-700"><MathMarkdown>{view === "student" ? studentContent : content}</MathMarkdown></div>
             </>}
           </div>
         </> : <EmptyTeachingState classrooms={classrooms} onGoClassrooms={() => navigate("/classrooms")} />}
       </section>
     </div>
-  </div>{printing && active && <article className="teaching-print-document"><header><h1>{active.title}</h1><p>{view === "student" ? "学生学习单" : "教师执行版"} · {active.duration} 分钟</p></header><div className="teaching-markdown"><MathMarkdown>{view === "student" ? active.student_content : content}</MathMarkdown></div></article>}</>;
+  </div>{printing && active && <article className="teaching-print-document"><header><h1>{active.title}</h1><p>{view === "student" ? "学生学习单" : "教师执行版"} · {active.duration} 分钟</p></header><div className="teaching-markdown"><MathMarkdown>{view === "student" ? studentContent : content}</MathMarkdown></div></article>}{active && <Modal open={showPublishPreview} title="发布前确认" okText="确认发布" cancelText="返回修改" confirmLoading={publishing} onOk={publish} onCancel={() => setShowPublishPreview(false)}><div className="space-y-3 text-sm"><p><strong>班级：</strong>{selectedClassroom?.name || "未选择"}</p><p><strong>任务：</strong>{active.topic} · {publishSections.find(item => item.value === publishSection)?.label}</p><p><strong>题目：</strong>{publishQuestionIds(active).join("、") || "无"}</p><p><strong>提示策略：</strong>{publishSection === "exit" ? "全程无提示" : publishSection === "diagnostic" ? "允许提示" : "练习可提示，最后一道迁移题无提示"}</p><Alert type="info" showIcon message="确认后会立即出现在学生的“我的任务”中" /></div></Modal>}</>;
 }
 
 function InsightsPanel({ data, packageData, loading, onRetry }: { data: Insights | null; packageData: PackageManifest; loading: boolean; onRetry: () => void }) {

@@ -53,10 +53,32 @@ class AssignmentCreateRequest(BaseModel):
     kind: Literal["diagnostic", "intervention", "retest"] = "diagnostic"
     count: int = Field(default=5, ge=1, le=8)
     due_at: datetime | None = None
+    hint_policy: Literal["allowed", "reduced", "blocked"] | None = None
+    transfer_question_id: str | None = Field(default=None, max_length=16)
 
 
 class InterventionCreateRequest(BaseModel):
     source_assignment_id: int | None = Field(default=None, gt=0)
+
+
+class InterventionTaskDraft(BaseModel):
+    group_key: str = Field(min_length=1, max_length=180)
+    group_label: str = Field(min_length=1, max_length=80)
+    focus: str = Field(min_length=1, max_length=160)
+    strategy: str = Field(default="", max_length=3000)
+    student_ids: list[int] = Field(min_length=1, max_length=500)
+    question_ids: list[str] = Field(min_length=1, max_length=10)
+    kind: Literal["diagnostic", "intervention", "retest"]
+    title: str = Field(min_length=1, max_length=180)
+    description: str = Field(default="", max_length=3000)
+    hint_policy: Literal["allowed", "reduced", "blocked"] = "reduced"
+    transfer_question_id: str | None = Field(default=None, max_length=16)
+    due_at: datetime | None = None
+
+
+class InterventionPublishRequest(BaseModel):
+    source_assignment_id: int | None = Field(default=None, gt=0)
+    tasks: list[InterventionTaskDraft] = Field(min_length=1, max_length=10)
 
 
 class AssignmentUpdateRequest(BaseModel):
@@ -64,6 +86,7 @@ class AssignmentUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=3000)
     due_at: datetime | None = None
     status: Literal["published", "cancelled", "archived"] | None = None
+    hint_policy: Literal["allowed", "reduced", "blocked"] | None = None
 
 
 def _require_teacher(user: User) -> None:
@@ -144,6 +167,12 @@ async def _assignment_payload(db: AsyncSession, assignment: LearningAssignment, 
             AssignmentRecipient.status == "completed",
         )
     )
+    late_submission_count = await db.scalar(
+        select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.assignment_id == assignment.id,
+            QuestionAttempt.submitted_late.is_(True),
+        )
+    )
     recipient = None
     if user_id is not None:
         recipient = (
@@ -154,7 +183,7 @@ async def _assignment_payload(db: AsyncSession, assignment: LearningAssignment, 
                 )
             )
         ).scalar_one_or_none()
-    return {
+    payload = {
         "id": assignment.id,
         "classroom_id": assignment.classroom_id,
         "source_assignment_id": assignment.source_assignment_id,
@@ -163,14 +192,31 @@ async def _assignment_payload(db: AsyncSession, assignment: LearningAssignment, 
         "kind": assignment.kind,
         "topic": assignment.topic,
         "status": assignment.status,
+        "hint_policy": assignment.hint_policy,
+        "transfer_question_id": assignment.transfer_question_id,
         "question_ids": [item.question_id for item in items],
         "recipient_count": int(recipient_count or 0),
         "completed_count": int(completed_count or 0),
+        "late_submission_count": int(late_submission_count or 0),
         "my_status": recipient.status if recipient else None,
         "group_label": recipient.group_label if recipient else None,
         "due_at": assignment.due_at.isoformat() if assignment.due_at else None,
         "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
     }
+
+    if user_id is not None:
+        attempted_ids = (
+            await db.execute(
+                select(QuestionAttempt.question_id)
+                .where(
+                    QuestionAttempt.assignment_id == assignment.id,
+                    QuestionAttempt.user_id == user_id,
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        payload["attempted_question_ids"] = list(attempted_ids)
+    return payload
 
 
 async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
@@ -191,6 +237,7 @@ async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
     ).scalars().all()
     assignment_ids = [item.id for item in assignments]
     assignment_kind = {item.id: item.kind for item in assignments}
+    assignment_transfer = {item.id: item.transfer_question_id for item in assignments}
     attempts: list[QuestionAttempt] = []
     if assignment_ids:
         attempts = (
@@ -198,7 +245,6 @@ async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
                 select(QuestionAttempt)
                 .where(QuestionAttempt.assignment_id.in_(assignment_ids))
                 .order_by(QuestionAttempt.id.desc())
-                .limit(5000)
             )
         ).scalars().all()
     radar = build_classroom_radar(
@@ -213,6 +259,7 @@ async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
                 "hint_count": item.hint_count,
                 "attempt_no": item.attempt_no,
                 "assignment_kind": assignment_kind.get(item.assignment_id),
+                "is_transfer": assignment_transfer.get(item.assignment_id) == item.question_id,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
             }
             for item in attempts
@@ -450,6 +497,13 @@ async def create_assignment(
             break
     if not selected:
         raise HTTPException(status_code=400, detail="当前题库没有找到匹配题目，请换一个更具体的知识点")
+    selected_ids = [row["ID"] for row in selected]
+    transfer_question_id = (payload.transfer_question_id or "").strip().upper() or None
+    if transfer_question_id and transfer_question_id not in selected_ids:
+        raise HTTPException(status_code=400, detail="迁移验证题必须包含在当前任务题目中")
+    if transfer_question_id is None and payload.kind in {"intervention", "retest"}:
+        transfer_question_id = selected_ids[-1]
+    hint_policy = payload.hint_policy or ("blocked" if payload.kind == "retest" else "reduced" if payload.kind == "intervention" else "allowed")
     assignment = LearningAssignment(
         classroom_id=classroom.id,
         created_by=user.id,
@@ -458,6 +512,8 @@ async def create_assignment(
         kind=kind,
         topic=(topic or "根据指定题目诊断")[:160],
         status="published",
+        hint_policy=hint_policy,
+        transfer_question_id=transfer_question_id,
         due_at=_parse_due_at(payload.due_at),
     )
     db.add(assignment)
@@ -471,8 +527,27 @@ async def create_assignment(
     return await _assignment_payload(db, assignment)
 
 
-@router.post("/classrooms/{classroom_id}/interventions")
-async def create_adaptive_interventions(
+async def _validate_source_assignment(
+    db: AsyncSession,
+    classroom_id: int,
+    source_assignment_id: int | None,
+) -> None:
+    if source_assignment_id is None:
+        return
+    source = (
+        await db.execute(
+            select(LearningAssignment).where(
+                LearningAssignment.id == source_assignment_id,
+                LearningAssignment.classroom_id == classroom_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=400, detail="来源任务不属于当前班级")
+
+
+@router.post("/classrooms/{classroom_id}/interventions/preview")
+async def preview_adaptive_interventions(
     classroom_id: int,
     payload: InterventionCreateRequest = Body(default=InterventionCreateRequest()),
     user: User = Depends(get_current_user),
@@ -485,28 +560,10 @@ async def create_adaptive_interventions(
     radar = await _radar_data(db, classroom)
     if not radar["groups"]:
         raise HTTPException(status_code=400, detail="班级暂无学生，不能生成干预任务")
-    source_assignment_id = payload.source_assignment_id
-    if source_assignment_id:
-        source = (
-            await db.execute(
-                select(LearningAssignment).where(
-                    LearningAssignment.id == source_assignment_id,
-                    LearningAssignment.classroom_id == classroom.id,
-                )
-            )
-        ).scalar_one_or_none()
-        if source is None:
-            raise HTTPException(status_code=400, detail="来源任务不属于当前班级")
-    created: list[LearningAssignment] = []
+    await _validate_source_assignment(db, classroom.id, payload.source_assignment_id)
+
+    drafts: list[dict[str, Any]] = []
     all_rows = load_questions()
-    classroom_assignment_ids = [item["id"] for item in radar["assignments"]]
-    if radar["assignments"]:
-        all_class_assignments = (
-            await db.execute(
-                select(LearningAssignment.id).where(LearningAssignment.classroom_id == classroom.id)
-            )
-        ).scalars().all()
-        classroom_assignment_ids = list(all_class_assignments)
     for group in radar["groups"][:10]:
         student_ids = [int(item) for item in group["student_ids"]]
         prior_ids = set(
@@ -514,7 +571,6 @@ async def create_adaptive_interventions(
                 await db.execute(
                     select(QuestionAttempt.question_id).where(
                         QuestionAttempt.user_id.in_(student_ids),
-                        QuestionAttempt.assignment_id.in_(classroom_assignment_ids),
                     )
                 )
             ).scalars().all()
@@ -529,31 +585,110 @@ async def create_adaptive_interventions(
         if not questions:
             continue
         kind = "diagnostic" if group["type"] == "needs_diagnostic" else "retest" if group["type"] == "transfer_ready" else "intervention"
+        question_ids = [str(row["ID"]) for row in questions]
+        transfer_question_id = question_ids[-1] if kind in {"intervention", "retest"} else None
+        hint_policy = "blocked" if kind == "retest" else "reduced" if kind == "intervention" else "allowed"
+        transfer_note = "最后一道题作为无提示迁移验证，" if transfer_question_id else ""
+        drafts.append(
+            {
+                "group_key": str(group["key"]),
+                "group_label": str(group["label"]),
+                "focus": str(group["focus"]),
+                "strategy": str(group["strategy"]),
+                "student_ids": student_ids,
+                "question_ids": question_ids,
+                "kind": kind,
+                "title": f"{group['label']} · {group['focus']}",
+                "description": f"{group['strategy']}{transfer_note}完成后自动回写班级认知雷达。",
+                "hint_policy": hint_policy,
+                "transfer_question_id": transfer_question_id,
+                "due_at": None,
+            }
+        )
+    if not drafts:
+        raise HTTPException(status_code=400, detail="当前题库没有足够题目生成干预任务")
+    return {
+        "source_assignment_id": payload.source_assignment_id,
+        "tasks": drafts,
+        "groups": len(drafts),
+        "students": sum(len(item["student_ids"]) for item in drafts),
+    }
+
+
+@router.post("/classrooms/{classroom_id}/interventions")
+async def publish_adaptive_interventions(
+    classroom_id: int,
+    payload: InterventionPublishRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _require_teacher(user)
+    classroom = await _owned_classroom(db, classroom_id, user.id)
+    if classroom.status != "active":
+        raise HTTPException(status_code=409, detail="班级已归档，请先恢复班级再发布任务")
+    await _validate_source_assignment(db, classroom.id, payload.source_assignment_id)
+
+    member_ids = set(
+        (
+            await db.execute(
+                select(ClassroomMembership.student_id).where(
+                    ClassroomMembership.classroom_id == classroom.id
+                )
+            )
+        ).scalars().all()
+    )
+    question_lookup = {str(row["ID"]): row for row in load_questions()}
+    assigned_students: set[int] = set()
+    normalized_tasks: list[tuple[InterventionTaskDraft, list[str], str | None]] = []
+    for task in payload.tasks:
+        student_ids = set(task.student_ids)
+        if len(student_ids) != len(task.student_ids):
+            raise HTTPException(status_code=400, detail=f"“{task.title}”包含重复学生")
+        if not student_ids.issubset(member_ids):
+            raise HTTPException(status_code=400, detail=f"“{task.title}”包含不属于当前班级的学生")
+        if assigned_students.intersection(student_ids):
+            raise HTTPException(status_code=400, detail="同一名学生不能同时出现在多个干预任务中")
+        assigned_students.update(student_ids)
+
+        question_ids = list(dict.fromkeys(item.strip().upper() for item in task.question_ids if item.strip()))
+        missing = [item for item in question_ids if item not in question_lookup]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"题目不存在：{'、'.join(missing)}")
+        transfer_question_id = (task.transfer_question_id or "").strip().upper() or None
+        if transfer_question_id and transfer_question_id not in question_ids:
+            raise HTTPException(status_code=400, detail="迁移验证题必须包含在对应任务题目中")
+        if task.kind in {"intervention", "retest"} and transfer_question_id is None:
+            raise HTTPException(status_code=400, detail=f"“{task.title}”缺少迁移验证题")
+        normalized_tasks.append((task, question_ids, transfer_question_id))
+
+    created: list[LearningAssignment] = []
+    for task, question_ids, transfer_question_id in normalized_tasks:
         assignment = LearningAssignment(
             classroom_id=classroom.id,
             created_by=user.id,
-            source_assignment_id=source_assignment_id,
-            title=f"{group['label']} · {group['focus']}",
-            description=f"{group['strategy']}最后一道题作为无提示迁移验证，完成后自动回写班级认知雷达。",
-            kind=kind,
-            topic=str(group["focus"])[:160],
+            source_assignment_id=payload.source_assignment_id,
+            title=task.title.strip()[:180],
+            description=task.description.strip(),
+            kind=task.kind,
+            topic=task.focus.strip()[:160],
             status="published",
+            hint_policy=task.hint_policy,
+            transfer_question_id=transfer_question_id,
+            due_at=_parse_due_at(task.due_at),
         )
         db.add(assignment)
         await db.flush()
-        for position, row in enumerate(questions):
-            db.add(AssignmentItem(assignment_id=assignment.id, question_id=row["ID"], position=position))
-        for student_id in student_ids:
+        for position, question_id in enumerate(question_ids):
+            db.add(AssignmentItem(assignment_id=assignment.id, question_id=question_id, position=position))
+        for student_id in task.student_ids:
             db.add(
                 AssignmentRecipient(
                     assignment_id=assignment.id,
                     student_id=student_id,
-                    group_label=str(group["label"])[:80],
+                    group_label=task.group_label.strip()[:80],
                 )
             )
         created.append(assignment)
-    if not created:
-        raise HTTPException(status_code=400, detail="当前题库没有足够题目生成干预任务")
     await db.commit()
     payloads = [await _assignment_payload(db, assignment) for assignment in created]
     return {
@@ -620,6 +755,8 @@ async def update_assignment(
         assignment.due_at = _parse_due_at(payload.due_at)
     if payload.status is not None:
         assignment.status = payload.status
+    if payload.hint_policy is not None:
+        assignment.hint_policy = payload.hint_policy
     await db.commit()
     await db.refresh(assignment)
     return await _assignment_payload(db, assignment)

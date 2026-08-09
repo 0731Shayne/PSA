@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Slider, Tag, message } from "antd";
-import { ExperimentOutlined, PlayCircleOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Empty, Input, Popconfirm, Slider, Tag, message } from "antd";
+import { DeleteOutlined, ExperimentOutlined, HistoryOutlined, PlayCircleOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { apiClient } from "@/api/client";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -8,6 +8,7 @@ type Params = Record<string, number>;
 type Point = { x: number; y: number; label?: string };
 type Experiment = { id: string; title: string; chapter: string; description: string; question: string; defaults: Params };
 type CatalogItem = { experiment_id: string; keypoints: string[]; question_ids: string[] };
+type ExperimentRun = { id: number; experiment_id: string; parameters: Params; result_summary: string; observation?: string; created_at?: string };
 
 const experiments: Experiment[] = [
   { id: "coin", title: "大数定律：抛硬币", chapter: "概率基础", description: "观察试验次数增加时，正面频率如何靠近理论概率。", question: "试验次数扩大10倍后，频率波动有什么变化？", defaults: { trials: 200, p: 0.5 } },
@@ -31,14 +32,22 @@ export default function ExperimentLab() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [runs, setRuns] = useState<ExperimentRun[]>([]);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
   const result = useMemo(() => calculate(activeId, params, seed), [activeId, params, seed]);
   const related = catalog.find(item => item.experiment_id === activeId);
 
-  useEffect(() => { apiClient.get<CatalogItem[]>("/api/question-bank/experiments/catalog").then(response => setCatalog(response.data)).catch(() => setCatalog([])); }, []);
+  useEffect(() => { Promise.all([apiClient.get<CatalogItem[]>("/api/question-bank/experiments/catalog"), apiClient.get<ExperimentRun[]>("/api/question-bank/experiments/runs")]).then(([catalogResponse, runResponse]) => { setCatalog(catalogResponse.data); setRuns(runResponse.data); }).catch(() => { setCatalog([]); setRuns([]); }); }, []);
 
   function choose(experiment: Experiment) { setActiveId(experiment.id); setParams(experiment.defaults); setSeed(value => value + 1); }
   function update(name: string, value: number) { setParams(current => ({ ...current, [name]: value })); }
-  async function saveRun() { setSaving(true); try { await apiClient.post("/api/question-bank/experiments/runs", { experiment_id: activeId, parameters: params, result_summary: result.summary, observation: notes[activeId] || "" }); message.success("实验参数、结果和观察已保存"); } catch { message.error("实验记录保存失败，当前观察内容已保留"); } finally { setSaving(false); } }
+  async function loadRuns() { try { const response = await apiClient.get<ExperimentRun[]>("/api/question-bank/experiments/runs"); setRuns(response.data); } catch { message.error("实验历史刷新失败"); } }
+  async function saveRun() { setSaving(true); try { await apiClient.post("/api/question-bank/experiments/runs", { experiment_id: activeId, parameters: params, result_summary: result.summary, observation: notes[activeId] || "" }); await loadRuns(); message.success("实验参数、结果和观察已保存"); } catch { message.error("实验记录保存失败，当前观察内容已保留"); } finally { setSaving(false); } }
+  function reopenRun(run: ExperimentRun) { const experiment = experiments.find(item => item.id === run.experiment_id); if (!experiment) return; setActiveId(run.experiment_id); setParams(run.parameters); setNotes(current => ({ ...current, [run.experiment_id]: run.observation || "" })); setSeed(value => value + 1); window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
+  function toggleCompare(id: number, checked: boolean) { setCompareIds(current => checked ? [...current, id].slice(-2) : current.filter(item => item !== id)); }
+  async function deleteRun(id: number) { try { await apiClient.delete(`/api/question-bank/experiments/runs/${id}`); setRuns(items => items.filter(item => item.id !== id)); setCompareIds(items => items.filter(item => item !== id)); message.success("实验记录已删除"); } catch { message.error("删除失败，记录仍然保留"); } }
+
+  const compared = compareIds.map(id => runs.find(item => item.id === id)).filter((item): item is ExperimentRun => Boolean(item));
 
   return <div><div className="mb-6"><h1 className="text-2xl font-black text-slate-900">参数化概率实验室</h1><p className="mt-1 text-sm text-slate-500">调节参数、运行随机模拟，在变化中理解概率统计概念</p></div><div className="grid gap-6 xl:grid-cols-[310px_1fr]">
     <aside aria-label="选择实验" className="flex snap-x gap-3 overflow-x-auto pb-2 xl:block xl:space-y-2 xl:overflow-visible xl:pb-0">{experiments.map(item => { const selected = activeId === item.id; return <button key={item.id} onClick={() => choose(item)} aria-pressed={selected} className={`w-full min-w-[270px] snap-start rounded-2xl border p-4 text-left transition xl:min-w-0 ${selected ? "border-teal-700 bg-teal-700" : "border-slate-200 bg-white hover:border-teal-300"}`}><div className="flex items-start justify-between gap-3"><span className={`text-sm font-extrabold ${selected ? "text-white" : "text-slate-800"}`}>{item.title}</span><Tag color={selected ? "cyan" : undefined} className="!mr-0">{item.chapter}</Tag></div><p className={`mt-2 text-sm leading-5 ${selected ? "text-teal-50" : "text-slate-500"}`}>{item.description}</p></button>; })}</aside>
@@ -48,7 +57,11 @@ export default function ExperimentLab() {
       <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-950"><label htmlFor="experiment-observation" className="text-sm font-bold text-amber-800">探究问题</label><p className="mt-2 text-sm leading-6">{active.question}</p><Input.TextArea id="experiment-observation" value={notes[activeId] || ""} onChange={event => setNotes(current => ({ ...current, [activeId]: event.target.value }))} className="mt-4" rows={3} maxLength={3000} showCount placeholder="记录你的观察和结论……" /><div className="mt-3 flex justify-end"><Button icon={<SaveOutlined />} loading={saving} onClick={saveRun}>保存本次实验记录</Button></div></div>
       {related && <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-5"><div className="min-w-0 flex-1"><p className="text-sm font-extrabold text-slate-800">把实验结论带回题库验证</p><div className="mt-2 flex flex-wrap gap-2">{related.keypoints.map(item => <Tag key={item} color="cyan">{item}</Tag>)}</div></div><div className="flex flex-wrap gap-2">{related.question_ids.map(id => <Button key={id} onClick={() => navigate(`/questions?query=${id}`)}>{id}</Button>)}</div></div>}
     </section>
-  </div></div>;
+  </div>
+  <section className="mt-6 border border-slate-200 bg-white" aria-labelledby="experiment-history-heading"><div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 px-5 py-4"><div><h2 id="experiment-history-heading" className="flex items-center gap-2 text-lg font-bold text-slate-900"><HistoryOutlined className="text-teal-700" />实验记录</h2><p className="mt-1 text-sm text-slate-600">重新打开任意一次参数；勾选两条记录可并排比较。</p></div><Button icon={<ReloadOutlined />} onClick={loadRuns}>刷新记录</Button></div>
+    {compared.length === 2 && <div className="grid gap-4 border-b border-slate-200 bg-teal-50/50 p-5 md:grid-cols-2">{compared.map(run => <div key={run.id} className="border border-teal-100 bg-white p-4"><p className="font-bold text-slate-900">{experiments.find(item => item.id === run.experiment_id)?.title || run.experiment_id}</p><p className="mt-2 text-sm text-slate-600">参数：{Object.entries(run.parameters).map(([key, value]) => `${key}=${value}`).join("，")}</p><p className="mt-2 text-sm leading-6 text-slate-700">{run.result_summary}</p><p className="mt-2 text-sm leading-6 text-amber-900">观察：{run.observation || "未记录"}</p></div>)}</div>}
+    {runs.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description="保存一次实验后，参数和观察会出现在这里" /> : <div className="divide-y divide-slate-100">{runs.map(run => <article key={run.id} className="grid gap-3 px-5 py-4 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center"><Checkbox checked={compareIds.includes(run.id)} disabled={!compareIds.includes(run.id) && compareIds.length >= 2} onChange={event => toggleCompare(run.id, event.target.checked)}>比较</Checkbox><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="text-slate-900">{experiments.find(item => item.id === run.experiment_id)?.title || run.experiment_id}</strong><Tag>{Object.entries(run.parameters).map(([key, value]) => `${key}=${value}`).join(" · ")}</Tag>{run.created_at && <span className="text-sm text-slate-500">{new Date(run.created_at).toLocaleString("zh-CN")}</span>}</div><p className="mt-1 text-sm text-slate-700">{run.result_summary}</p>{run.observation && <p className="mt-1 text-sm text-amber-800">观察：{run.observation}</p>}</div><div className="flex gap-2"><Button onClick={() => reopenRun(run)}>重新打开</Button><Popconfirm title="删除这条实验记录？" okText="删除" cancelText="取消" onConfirm={() => deleteRun(run.id)}><Button danger type="text" icon={<DeleteOutlined />} aria-label="删除实验记录" /></Popconfirm></div></article>)}</div>}
+  </section></div>;
 }
 
 function Range({ label, value, min, max, step = 1, onChange, suffix = "" }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (value: number) => void }) { return <div><div className="flex justify-between text-sm font-bold text-slate-600"><span>{label}</span><span className="text-teal-800">{value}{suffix}</span></div><Slider aria-label={label} min={min} max={max} step={step} value={value} onChange={onChange} /></div>; }

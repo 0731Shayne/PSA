@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { Avatar, Button, Drawer, Dropdown, Menu, Popconfirm, Tooltip, message } from "antd";
 import type { MenuProps } from "antd";
-import { BookOutlined, CheckSquareOutlined, DatabaseOutlined, ExperimentOutlined, HomeOutlined, LogoutOutlined, MenuOutlined, MessageOutlined, NodeIndexOutlined, RadarChartOutlined, ReadOutlined, ReloadOutlined, RightOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
+import { BookOutlined, CheckSquareOutlined, DatabaseOutlined, ExperimentOutlined, HomeOutlined, LockOutlined, LogoutOutlined, MenuOutlined, MessageOutlined, NodeIndexOutlined, RadarChartOutlined, ReadOutlined, ReloadOutlined, RightOutlined, SwapOutlined, UserOutlined } from "@ant-design/icons";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { resetDemoData } from "@/demo/demoApi";
 import { BrandMark } from "@/components/BrandMark";
+import { confirmUnsavedNavigation } from "@/utils/unsavedChanges";
 
 const items = [
   { path: "/dashboard", label: "学习工作台", shortLabel: "工作台", icon: <HomeOutlined /> },
@@ -34,22 +35,29 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const current = nav.find(item => location.pathname.startsWith(item.path)) || nav[0];
   const menuItems: MenuProps["items"] = nav.map(item => ({ key: item.path, icon: item.icon, label: item.label }));
   const accountItems: MenuProps["items"] = [
-    { key: "identity", type: "group", label: teacher ? "教师账号" : "学生账号", children: [{ key: "profile", icon: <UserOutlined />, label: user?.name || "个人账号", disabled: true }] },
+    { key: "identity", type: "group", label: teacher ? "教师账号" : "学生账号", children: [{ key: "profile", icon: <UserOutlined />, label: user?.name || "个人账号", disabled: true }, { key: "security", icon: <LockOutlined />, label: "账号与安全" }] },
     { type: "divider" },
     { key: "logout", icon: <LogoutOutlined />, label: isDemo ? "退出演示" : "退出登录", danger: true },
   ];
 
+  function go(path: string) {
+    if (confirmUnsavedNavigation()) navigate(path);
+  }
+
   function selectMenu({ key }: { key: string }) {
+    if (!confirmUnsavedNavigation()) return;
     navigate(key);
     setMobileOpen(false);
   }
 
   async function signOut() {
+    if (!confirmUnsavedNavigation()) return;
     await logout();
     navigate("/login");
   }
 
   function switchDemoRole() {
+    if (!confirmUnsavedNavigation()) return;
     enterDemo(teacher ? "student" : "teacher");
     navigate("/dashboard");
     message.success(`已切换到${teacher ? "学生" : "教师"}端演示`);
@@ -62,7 +70,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   const brand = (
-    <button onClick={() => navigate("/dashboard")} className="brand-button" aria-label="返回学习工作台">
+    <button onClick={() => go("/dashboard")} className="brand-button" aria-label="返回学习工作台">
       <BrandMark />
       <span className="min-w-0 text-left">
         <span className="block truncate text-base font-bold tracking-tight text-slate-900">概率统计教学助手</span>
@@ -86,7 +94,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <div className="study-tip rounded-2xl p-4">
             <p className="text-sm font-bold text-teal-900">学习小提示</p>
             <p className="mt-2 text-sm font-medium leading-6 tracking-[.01em] text-slate-600">先尝试自己作答，再选择提示，学习效果会更好。</p>
-            <button onClick={() => navigate("/tutor")} className="mt-3 flex items-center gap-1 text-sm font-bold text-teal-800">开始提问 <RightOutlined className="text-xs" /></button>
+            <button onClick={() => go("/tutor")} className="mt-3 flex items-center gap-1 text-sm font-bold text-teal-800">开始提问 <RightOutlined className="text-xs" /></button>
           </div>
         </div>
       </aside>
@@ -108,7 +116,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
           <Dropdown
-            menu={{ items: accountItems, onClick: ({ key }) => { if (key === "logout") void signOut(); } }}
+            menu={{ items: accountItems, onClick: ({ key }) => { if (key === "logout") void signOut(); else if (key === "security") go("/account/security"); } }}
             placement="bottomRight"
             trigger={["click"]}
           >
@@ -122,7 +130,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="mobile-tabbar" aria-label="主导航">
-        {mobileNav.map(item => { const active = location.pathname.startsWith(item.path); return <Tooltip key={item.path} title={item.label}><button onClick={() => navigate(item.path)} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>{item.icon}<span>{item.shortLabel}</span></button></Tooltip>; })}
+        {mobileNav.map(item => { const active = location.pathname.startsWith(item.path); return <Tooltip key={item.path} title={item.label}><button onClick={() => go(item.path)} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>{item.icon}<span>{item.shortLabel}</span></button></Tooltip>; })}
       </nav>
 
       <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} placement="left" width={286} title="课程导航" styles={{ body: { padding: 0 } }}>
