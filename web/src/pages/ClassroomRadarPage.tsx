@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Skeleton, Tag, message } from "antd";
+import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Skeleton, Tag, Tabs, Drawer, message } from "antd";
 import { CheckCircleOutlined, CopyOutlined, DeleteOutlined, InboxOutlined, PlusOutlined, RadarChartOutlined, ReloadOutlined, SendOutlined, StopOutlined, SyncOutlined, TeamOutlined, UserDeleteOutlined, WarningOutlined } from "@ant-design/icons";
+import { useSearchParams } from "react-router-dom";
+import { MathMarkdown } from "@/components/MathMarkdown";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -9,18 +11,23 @@ interface RadarGroup { key: string; type: string; label: string; focus: string; 
 interface Keypoint { name: string; mastery: number; confidence: number; students: number; at_risk: number; developing: number; mastered: number; top_error?: string; prerequisites: string[] }
 interface StudentRow { id: number; name: string; overall_mastery: number; evidence_level: "low" | "medium" | "high"; attempts: number; questions: number; risk_keypoints: number; next_focus: string; top_error?: string; group_label: string; group_focus: string; independent_transfer: boolean }
 interface Assignment { id: number; title: string; kind: string; topic: string; status: "published" | "cancelled" | "archived"; recipient_count: number; completed_count: number; late_submission_count?: number; question_ids: string[]; due_at?: string; created_at?: string }
-interface Radar { classroom: Classroom; summary: { members: number; active_students: number; attempts: number; needs_intervention: number; independent_transfer: number }; keypoints: Keypoint[]; students: StudentRow[]; groups: RadarGroup[]; assignments: Assignment[] }
+interface Radar { classroom: Classroom; summary: { pending_review?: number; members: number; active_students: number; attempts: number; needs_intervention: number; independent_transfer: number }; keypoints: Keypoint[]; students: StudentRow[]; groups: RadarGroup[]; assignments: Assignment[] }
 interface InterventionDraft { group_key: string; group_label: string; focus: string; strategy: string; student_ids: number[]; question_ids: string[]; kind: "diagnostic" | "intervention" | "retest"; title: string; description: string; hint_policy: "allowed" | "reduced" | "blocked"; transfer_question_id?: string; due_at?: string }
 interface InterventionPreview { source_assignment_id?: number; tasks: InterventionDraft[]; groups: number; students: number }
 
 const kindLabel: Record<string, string> = { diagnostic: "诊断", intervention: "干预", retest: "迁移验证" };
-const evidenceLabel = { low: "证据积累中", medium: "中等可信", high: "高可信" };
+const evidenceLabel = { low: "证据较少", medium: "证据积累中", high: "证据较充分" };
 
 export default function ClassroomRadarPage() {
   const { user } = useAuth();
   const teacher = user?.role === "teacher";
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
-  const [selectedId, setSelectedId] = useState<number>();
+  const [search,setSearch] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<number>(Number(search.get("classroom")) || 0);
+  const requestedPanel = search.get("tab") || "overview";
+  const panel = ["overview","students","tasks","review"].includes(requestedPanel) ? requestedPanel : "overview";
+  const [studentDetail,setStudentDetail] = useState<StudentRow|null>(null);
+  function showPanel(tab:string) { setSearch(previous=>{const next=new URLSearchParams(previous);next.set("tab",tab);return next;}); }
   const [radar, setRadar] = useState<Radar | null>(null);
   const [loading, setLoading] = useState(true);
   const [radarLoading, setRadarLoading] = useState(false);
@@ -159,9 +166,12 @@ export default function ClassroomRadarPage() {
   }
 
   function showDiagnosticForm() {
+    showPanel("tasks");
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    document.getElementById("diagnostic-panel")?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
-    window.setTimeout(() => document.querySelector<HTMLInputElement>("#diagnostic-panel input")?.focus(), reducedMotion ? 0 : 250);
+    window.setTimeout(() => {
+      document.getElementById("diagnostic-panel")?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+      document.querySelector<HTMLInputElement>("#diagnostic-panel input")?.focus({preventScroll:true});
+    }, 50);
   }
 
   return <div className="course-page classroom-radar-page mx-auto max-w-[1440px]">
@@ -185,8 +195,8 @@ export default function ClassroomRadarPage() {
           <Metric label="班级学生" value={radar.summary.members} note={`${radar.summary.active_students} 人已有作答证据`} />
           <Metric label="任务作答" value={radar.summary.attempts} note="仅统计当前班级任务" />
           <Metric label="需教师干预" value={radar.summary.needs_intervention} note="不含证据积累组" tone="warning" />
-          <Metric label="独立迁移" value={radar.summary.independent_transfer} note="干预后无提示正确" tone="success" />
-          <Metric label="已评估知识点" value={radar.keypoints.length} note="掌握度与置信度并列" last />
+          <Metric label="独立迁移" value={radar.summary.independent_transfer} note="首次、未受辅助的新题作答" tone="success" />
+          <Metric label="已评估知识点" value={radar.keypoints.length} note="不同题目形成规则证据" last />
         </section>
 
         <section className="mt-4 grid gap-4 border border-[#d7e5dd] bg-[#edf4ef] px-5 py-5 sm:grid-cols-[1fr_auto] sm:items-center" aria-labelledby="next-action-heading">
@@ -194,14 +204,14 @@ export default function ClassroomRadarPage() {
           {radar.summary.members === 0 ? <Button icon={<CopyOutlined />} onClick={copyCode} disabled={radar.classroom.status !== "active"}>复制班级码</Button> : radar.summary.attempts === 0 ? <Button type="primary" onClick={showDiagnosticForm} disabled={radar.classroom.status !== "active"}>填写诊断主题</Button> : <Button type="primary" loading={intervening} icon={<RadarChartOutlined />} onClick={createInterventions} disabled={radar.classroom.status !== "active"}>生成并审核任务草稿</Button>}
         </section>
 
-        <section id="diagnostic-panel" className="mt-6 border-y border-slate-200 bg-white" aria-labelledby="diagnostic-heading">
-          <div className="grid gap-5 px-5 py-5 lg:grid-cols-[280px_1fr]"><div><h2 id="diagnostic-heading" className="text-lg font-bold text-slate-900">发布短诊断</h2><p className="mt-1 text-sm leading-6 text-slate-600">建议每次 3—5 题；系统会自动兼顾基础、提升和迁移证据。</p></div><Form layout="inline" onFinish={publishDiagnostic} initialValues={{ count: 5 }} className="gap-y-3" disabled={radar.classroom.status !== "active"}><Form.Item name="topic" label="知识点" rules={[{ required: true, message: "请输入知识点" }]}><Input placeholder="如：贝叶斯公式" maxLength={160} /></Form.Item><Form.Item name="title" label="任务名称"><Input placeholder="留空则自动命名" maxLength={180} /></Form.Item><Form.Item name="count" label="题数"><InputNumber min={1} max={8} /></Form.Item><Form.Item name="due_at" label="截止时间"><DatePicker showTime format="YYYY-MM-DD HH:mm" placeholder="可选" /></Form.Item><Form.Item><Button type="primary" htmlType="submit" loading={publishing} icon={<SendOutlined />}>发布给全班</Button></Form.Item></Form></div>
-        </section>
-
-        <div className="mt-8 grid items-start gap-5 xl:grid-cols-[1.18fr_.82fr]">
+        <Tabs className="mt-5" activeKey={panel} onChange={showPanel} items={[
+          {key:"overview",label:"知识点与分组"},{key:"students",label:"学生证据"},
+          {key:"tasks",label:"任务与发布"},{key:"review",label:`待复核 (${radar.summary.pending_review || 0})`},
+        ]}/>
+        {panel === "overview" && <>        <div className="mt-8 grid items-start gap-5 xl:grid-cols-[1.18fr_.82fr]">
           <section className="overflow-hidden border border-slate-200 bg-white" aria-labelledby="keypoint-heading">
             <div className="border-b border-slate-200 px-5 py-4"><h2 id="keypoint-heading" className="text-lg font-bold text-slate-900">知识点风险</h2><p className="mt-1 text-sm text-slate-600">优先显示风险人数较多且掌握度较低的知识点。</p></div>
-            {radar.keypoints.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description="发布并完成第一组诊断后生成知识点风险" /> : <div className="divide-y divide-slate-100">{radar.keypoints.slice(0, 10).map(item => <div key={item.name} className="grid gap-3 px-5 py-4 md:grid-cols-[minmax(150px,1fr)_180px_130px]"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-900">{item.name}</span>{item.at_risk > 0 && <Tag color="orange">{item.at_risk} 人需巩固</Tag>}</div><p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{item.top_error ? `常见问题：${item.top_error}` : item.prerequisites.length ? `前置：${item.prerequisites.join("、")}` : "暂无集中错误类型"}</p></div><div><div className="mb-1 flex justify-between text-sm text-slate-600"><span>掌握度</span><span className="tabular-nums">{item.mastery}%</span></div><Progress percent={item.mastery} size="small" showInfo={false} strokeColor={item.mastery < 60 ? "#d97706" : "#0f766e"} /></div><div className="flex items-center justify-between gap-2 text-sm"><span className="text-slate-600">置信度</span><span className="font-semibold tabular-nums text-slate-800">{item.confidence}% · {item.students}人</span></div></div>)}</div>}
+            {radar.keypoints.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description="发布并完成第一组诊断后生成知识点风险" /> : <div className="divide-y divide-slate-100">{radar.keypoints.slice(0, 10).map(item => <div key={item.name} className="grid gap-3 px-5 py-4 md:grid-cols-[minmax(150px,1fr)_180px_130px]"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-900">{item.name}</span>{item.at_risk > 0 && <Tag color="orange">{item.at_risk} 人需巩固</Tag>}</div><p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{item.top_error ? `常见问题：${item.top_error}` : item.prerequisites.length ? `前置：${item.prerequisites.join("、")}` : "暂无集中错误类型"}</p></div><div><div className="mb-1 flex justify-between text-sm text-slate-600"><span>掌握度</span><span className="tabular-nums">{item.mastery}%</span></div><Progress percent={item.mastery} size="small" showInfo={false} strokeColor={item.mastery < 60 ? "#d97706" : "#0f766e"} /></div><div className="flex items-center justify-between gap-2 text-sm"><span className="text-slate-600">证据充足度</span><span className="font-semibold tabular-nums text-slate-800">{item.confidence}% · {item.students}人</span></div></div>)}</div>}
           </section>
 
           <section className="overflow-hidden border border-slate-200 bg-white" aria-labelledby="group-heading">
@@ -210,14 +220,23 @@ export default function ClassroomRadarPage() {
           </section>
         </div>
 
-        <section className="mt-8 overflow-hidden border border-slate-200 bg-white" aria-labelledby="student-heading">
+</>}
+        {panel === "students" && <>        <section className="mt-8 overflow-hidden border border-slate-200 bg-white" aria-labelledby="student-heading">
           <div className="border-b border-slate-200 px-5 py-4"><h2 id="student-heading" className="text-lg font-bold text-slate-900">学生证据明细</h2><p className="mt-1 text-sm text-slate-600">低证据不会被标记为确定断层；分组名称描述当前任务，不定义学生能力。</p></div>
-          {radar.students.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description="班级还没有学生" /> : <div className="overflow-x-auto"><table className="w-full min-w-[960px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-slate-600"><tr><th className="sticky left-0 z-10 bg-slate-50 px-5 py-3 font-semibold">学生</th><th className="px-4 py-3 font-semibold">当前分组</th><th className="px-4 py-3 font-semibold">下一焦点</th><th className="px-4 py-3 font-semibold">掌握度</th><th className="px-4 py-3 font-semibold">证据</th><th className="px-4 py-3 font-semibold">风险</th><th className="px-4 py-3 font-semibold">独立迁移</th><th className="px-5 py-3 font-semibold">成员操作</th></tr></thead><tbody className="divide-y divide-slate-100">{radar.students.map(student => <tr key={student.id} className="group hover:bg-slate-50"><td className="sticky left-0 bg-white px-5 py-3.5 font-semibold text-slate-900 group-hover:bg-slate-50">{student.name}</td><td className="px-4 py-3.5"><Tag color={student.group_label === "迁移挑战组" ? "green" : student.group_label === "证据积累组" ? "blue" : "orange"}>{student.group_label}</Tag></td><td className="px-4 py-3.5 text-slate-700">{student.group_focus || student.next_focus}</td><td className="px-4 py-3.5 font-semibold tabular-nums text-slate-800">{student.overall_mastery}%</td><td className="px-4 py-3.5"><span className="text-slate-700">{evidenceLabel[student.evidence_level]}</span><span className="ml-1 text-slate-600">· {student.questions}题</span></td><td className="px-4 py-3.5 text-slate-700">{student.risk_keypoints ? `${student.risk_keypoints}个知识点` : student.top_error || "暂无"}</td><td className="px-4 py-3.5">{student.independent_transfer ? <span className="font-semibold text-emerald-700"><CheckCircleOutlined className="mr-1" />已验证</span> : <span className="text-slate-600">待验证</span>}</td><td className="px-5 py-3.5"><Popconfirm title={`将 ${student.name} 移出班级？`} description="既有任务作答证据会保留，之后不再收到本班新任务。" okText="移出" cancelText="取消" onConfirm={() => removeStudent(student.id, student.name)}><Button danger type="text" icon={<UserDeleteOutlined />}>移出</Button></Popconfirm></td></tr>)}</tbody></table></div>}
+          {radar.students.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description="班级还没有学生" /> : <div className="overflow-x-auto"><table className="w-full min-w-[960px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-slate-600"><tr><th className="sticky left-0 z-10 bg-slate-50 px-5 py-3 font-semibold">学生</th><th className="px-4 py-3 font-semibold">当前分组</th><th className="px-4 py-3 font-semibold">下一焦点</th><th className="px-4 py-3 font-semibold">掌握度</th><th className="px-4 py-3 font-semibold">证据</th><th className="px-4 py-3 font-semibold">风险</th><th className="px-4 py-3 font-semibold">独立迁移</th><th className="px-5 py-3 font-semibold">成员操作</th></tr></thead><tbody className="divide-y divide-slate-100">{radar.students.map(student => <tr key={student.id} className="group hover:bg-slate-50"><td className="sticky left-0 bg-white px-5 py-3.5 font-semibold text-slate-900 group-hover:bg-slate-50"><button className="text-teal-800 underline underline-offset-4" onClick={()=>setStudentDetail(student)}>{student.name}</button></td><td className="px-4 py-3.5"><Tag color={student.group_label === "迁移挑战组" ? "green" : student.group_label === "证据积累组" ? "blue" : "orange"}>{student.group_label}</Tag></td><td className="px-4 py-3.5 text-slate-700">{student.group_focus || student.next_focus}</td><td className="px-4 py-3.5 font-semibold tabular-nums text-slate-800">{student.overall_mastery}%</td><td className="px-4 py-3.5"><span className="text-slate-700">{evidenceLabel[student.evidence_level]}</span><span className="ml-1 text-slate-600">· {student.questions}题</span></td><td className="px-4 py-3.5 text-slate-700">{student.risk_keypoints ? `${student.risk_keypoints}个知识点` : student.top_error || "暂无"}</td><td className="px-4 py-3.5">{student.independent_transfer ? <span className="font-semibold text-emerald-700"><CheckCircleOutlined className="mr-1" />已验证</span> : <span className="text-slate-600">待验证</span>}</td><td className="px-5 py-3.5"><Popconfirm title={`将 ${student.name} 移出班级？`} description="既有任务作答证据会保留，之后不再收到本班新任务。" okText="移出" cancelText="取消" onConfirm={() => removeStudent(student.id, student.name)}><Button danger type="text" icon={<UserDeleteOutlined />}>移出</Button></Popconfirm></td></tr>)}</tbody></table></div>}
+        </section>
+
+</>}
+        {panel === "tasks" && <>        <section id="diagnostic-panel" className="mt-6 border-y border-slate-200 bg-white" aria-labelledby="diagnostic-heading">
+          <div className="grid gap-5 px-5 py-5 lg:grid-cols-[280px_1fr]"><div><h2 id="diagnostic-heading" className="text-lg font-bold text-slate-900">发布短诊断</h2><p className="mt-1 text-sm leading-6 text-slate-600">建议每次 3—5 题；系统会自动兼顾基础、提升和迁移证据。</p></div><Form layout="inline" onFinish={publishDiagnostic} initialValues={{ count: 5 }} className="gap-y-3" disabled={radar.classroom.status !== "active"}><Form.Item name="topic" label="知识点" rules={[{ required: true, message: "请输入知识点" }]}><Input placeholder="如：贝叶斯公式" maxLength={160} /></Form.Item><Form.Item name="title" label="任务名称"><Input placeholder="留空则自动命名" maxLength={180} /></Form.Item><Form.Item name="count" label="题数"><InputNumber min={1} max={8} /></Form.Item><Form.Item name="due_at" label="截止时间"><DatePicker showTime format="YYYY-MM-DD HH:mm" placeholder="可选" /></Form.Item><Form.Item><Button type="primary" htmlType="submit" loading={publishing} icon={<SendOutlined />}>发布给全班</Button></Form.Item></Form></div>
         </section>
 
         <section className="mt-8 overflow-hidden border border-slate-200 bg-white" aria-labelledby="assignment-heading"><div className="border-b border-slate-200 px-5 py-4"><h2 id="assignment-heading" className="text-lg font-bold text-slate-900">最近任务</h2></div>{radar.assignments.length === 0 ? <Empty className="!my-8" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有发布任务" /> : <div className="divide-y divide-slate-100">{radar.assignments.map(item => <div key={item.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-900">{item.title}</span><Tag>{kindLabel[item.kind] || item.kind}</Tag>{item.status !== "published" && <Tag color={item.status === "cancelled" ? "red" : "default"}>{item.status === "cancelled" ? "已撤回" : "已归档"}</Tag>}{Boolean(item.late_submission_count) && <Tag color="red">{item.late_submission_count} 次迟交</Tag>}</div><p className="mt-1 text-sm text-slate-600">{item.question_ids.length} 道题 · {item.topic}{item.due_at ? ` · 截止 ${new Date(item.due_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}</p></div><span className="text-sm text-slate-600">{item.completed_count}/{item.recipient_count} 人完成</span><Progress className="!mb-0 w-36" percent={item.recipient_count ? Math.round(item.completed_count / item.recipient_count * 100) : 0} size="small" showInfo={false} />{item.status === "published" ? <Popconfirm title="撤回这项任务？" description="学生端将不再显示，已有作答和完成进度会保留。" okText="撤回" cancelText="取消" onConfirm={() => setAssignmentStatus(item.id, "cancelled")}><Button danger type="text" icon={<StopOutlined />}>撤回</Button></Popconfirm> : <div className="flex gap-1"><Button type="link" onClick={() => setAssignmentStatus(item.id, "published")}>重新发布</Button>{item.status !== "archived" && <Button type="text" icon={<InboxOutlined />} onClick={() => setAssignmentStatus(item.id, "archived")}>归档</Button>}</div>}</div>)}</div>}</section>
+</>}
+        {panel === "review" && selectedId && <ReviewQueue classroomId={selectedId} onReviewed={()=>loadRadar(selectedId)}/>}
       </>}
     </>}
+    <Drawer title={studentDetail?`${studentDetail.name} · 学习证据`:"学生证据"} open={!!studentDetail} onClose={()=>setStudentDetail(null)}>{studentDetail && <div className="space-y-4"><p>当前任务需要：{studentDetail.group_label}</p><p>下一焦点：{studentDetail.group_focus || studentDetail.next_focus}</p><p>依据 {studentDetail.questions} 道已判定题目、{studentDetail.attempts} 次作答。</p><p>掌握度 {studentDetail.overall_mastery}% · {evidenceLabel[studentDetail.evidence_level]}</p><p>主要问题：{studentDetail.top_error || "暂无集中错误"}</p><Alert type="info" message="这些数值用于安排后续练习，不是固定能力标签" description="重复订正不增加证据题数；待复核作答不计入掌握度。"/></div>}</Drawer>
     <Modal open={!!interventionPreview} title="审核分组任务草稿" width={860} okText={`确认下发 ${interventionPreview?.tasks.length || 0} 组任务`} cancelText="继续查看雷达" confirmLoading={publishingInterventions} okButtonProps={{ disabled: !interventionPreview?.tasks.length }} onOk={publishInterventions} onCancel={() => setInterventionPreview(null)}>
       <Alert className="mb-4" type="info" showIcon message="此处只是草稿，确认前不会发给学生" description="请核对每组学生人数、题目、提示策略和迁移验证题。删除不合适的组后，可稍后重新生成。" />
       <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">{interventionPreview?.tasks.map((task, index) => <section key={`${task.group_key}-${index}`} className="border border-slate-200 p-4">
@@ -233,4 +252,20 @@ export default function ClassroomRadarPage() {
 function Metric({ label, value, note, tone = "default", last = false }: { label: string; value: number; note: string; tone?: "default" | "warning" | "success"; last?: boolean }) {
   const color = tone === "warning" ? "text-amber-700" : tone === "success" ? "text-emerald-700" : "text-slate-950";
   return <div className={`border-b border-slate-100 px-5 py-4 last:border-b-0 sm:odd:border-r lg:border-b-0 lg:odd:border-r-0 ${last ? "sm:col-span-2 lg:col-span-1" : ""}`}><p className="text-sm font-semibold text-slate-600">{label}</p><p className={`mt-1 text-xl font-bold tabular-nums ${color}`}>{value}</p><p className="mt-1 text-xs text-slate-600">{note}</p></div>;
+}
+
+
+type PendingReview={id:number;student_name:string;question_id:string;question:{question:string;answer:string;explanation:string};answer?:string;reasoning?:string;image_data_url?:string;ocr_text?:string;feedback:string};
+function ReviewQueue({classroomId,onReviewed}:{classroomId:number;onReviewed:()=>void}) {
+  const [rows,setRows]=useState<PendingReview[]>([]);
+  const [error,setError]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState<PendingReview|null>(null);
+  const [verdict,setVerdict]=useState("correct");
+  const [feedback,setFeedback]=useState("");
+  const [saving,setSaving]=useState(false);
+  async function load(){setLoading(true);try{const r=await apiClient.get<PendingReview[]>(`/api/classrooms/${classroomId}/reviews`);setRows(r.data);setError(false);}catch{setError(true);}finally{setLoading(false);}}
+  useEffect(()=>{setSelected(null);void load();},[classroomId]);
+  async function save(){if(!selected || !feedback.trim())return;setSaving(true);try{await apiClient.patch(`/api/classrooms/${classroomId}/reviews/${selected.id}`,{verdict,feedback});setSelected(null);await load();onReviewed();message.success("复核已保存，学习证据已更新");}catch{message.error("复核保存失败，请刷新后重试");}finally{setSaving(false);}}
+  return <section className="editorial-panel"><h2 className="text-lg font-bold">待复核作答</h2><p className="my-3 text-sm text-slate-600">每批显示最早 50 份；复核后自动补充。提交记录已保留，暂不判断学生能力。</p>{error?<Alert type="error" message="复核列表加载失败" action={<Button onClick={load}>重试</Button>}/>:loading?<Skeleton active/>:!rows.length?<Empty description="没有待复核作答"/>:rows.map(row=><div key={row.id} className="flex items-center justify-between gap-3 border-t py-4"><div><strong>{row.student_name}</strong><p className="mt-1 text-sm">{row.question_id} · {row.feedback}</p></div><Button onClick={()=>{setSelected(row);setFeedback("");setVerdict("correct");}}>查看并复核</Button></div>)}<Modal title="复核原始作答" open={!!selected} onCancel={()=>setSelected(null)} onOk={save} confirmLoading={saving} okText="保存复核结果" okButtonProps={{disabled:!feedback.trim()}} width={760}>{selected && <div className="space-y-4"><MathMarkdown>{selected.question.question}</MathMarkdown><div className="border p-3"><p className="font-bold">学生原始作答</p><MathMarkdown>{selected.answer || "未填写答案"}</MathMarkdown><MathMarkdown>{selected.reasoning || "未填写思路"}</MathMarkdown>{selected.image_data_url && <img className="max-h-80 max-w-full" src={selected.image_data_url} alt="学生原始手写作答"/>}{selected.ocr_text && <MathMarkdown>{selected.ocr_text}</MathMarkdown>}</div><details><summary>查看教师参考答案</summary><MathMarkdown>{selected.question.answer}</MathMarkdown><MathMarkdown>{selected.question.explanation}</MathMarkdown></details><Select aria-label="复核结论" className="w-full" value={verdict} onChange={setVerdict} options={[{value:"correct",label:"正确"},{value:"partial",label:"部分正确"},{value:"incorrect",label:"错误"}]}/><Input.TextArea aria-label="复核依据" value={feedback} onChange={e=>setFeedback(e.target.value)} placeholder="说明判断依据与下一步建议" rows={3} maxLength={2000}/></div>}</Modal></section>;
 }

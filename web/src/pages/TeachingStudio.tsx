@@ -99,6 +99,7 @@ const publishSections = [
 ];
 
 export default function TeachingStudio() {
+  const [setupForm] = Form.useForm();
   const { user } = useAuth();
   const navigate = useNavigate();
   const teacher = user?.role === "teacher";
@@ -353,16 +354,16 @@ export default function TeachingStudio() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6">
           <div className="mb-5 flex items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-lg text-teal-800"><ReadOutlined /></span>
-            <div><h2 className="font-extrabold text-slate-900">生成教学包</h2><p className="text-sm text-slate-600">没有模型 Key 也能完整生成</p></div>
+            <div><h2 className="font-extrabold text-slate-900">生成教学包</h2><p className="text-sm text-slate-600">依据课程题库与课堂规则生成</p></div>
           </div>
-          <Form layout="vertical" initialValues={{ duration: 45, lesson_type: "concept", learner_profile: "mixed" }} onFinish={submit} requiredMark={false}>
+          <Form form={setupForm} layout="vertical" initialValues={{ duration: 45, lesson_type: "concept", learner_profile: "mixed" }} onFinish={submit} requiredMark={false}>
             <Form.Item name="topic" label="教学主题" rules={[{ required: true, message: "请输入教学主题" }, { max: 120, message: "教学主题请控制在 120 个字符以内" }]}>
               <Input size="large" maxLength={120} showCount placeholder="如：贝叶斯公式" />
             </Form.Item>
             <Form.Item name="classroom_id" label="关联班级（可选）" extra="关联后只读取该班级与所选题目相关的作答证据">
               <Select allowClear size="large" placeholder="先生成通用版" options={classrooms.map(item => ({ value: item.id, label: `${item.name} · ${item.members} 人` }))} />
             </Form.Item>
-            <div className="grid grid-cols-2 gap-3">
+            <details className="mb-5"><summary className="cursor-pointer py-2 font-semibold text-teal-800">课堂设置与更多要求</summary><div className="mt-3 grid grid-cols-2 gap-3">
               <Form.Item name="lesson_type" label="课堂类型"><Select size="large" options={lessonTypes} /></Form.Item>
               <Form.Item name="duration" label="时长（分钟）"><InputNumber size="large" min={15} max={180} className="!w-full" /></Form.Item>
             </div>
@@ -371,7 +372,7 @@ export default function TeachingStudio() {
               <Select mode="tags" size="large" tokenSeparators={[",", "，", " "]} placeholder="不填则按主题自动检索" open={false} maxTagCount="responsive" />
             </Form.Item>
             <Form.Item name="objectives" label="教师目标或限制条件"><Input.TextArea rows={3} maxLength={3000} showCount placeholder="如：学生会套公式，但常混淆条件概率方向…" /></Form.Item>
-            <Button block type="primary" size="large" htmlType="submit" loading={loading} icon={<SendOutlined />}>生成三件套教学包</Button>
+            </details><Button block type="primary" size="large" htmlType="submit" loading={loading} icon={<SendOutlined />}>生成三件套教学包</Button>
           </Form>
           <div className="mt-5 border-t border-slate-100 pt-4 text-sm text-slate-600">
             <p className="font-bold text-slate-800">一次生成</p>
@@ -400,7 +401,7 @@ export default function TeachingStudio() {
         </section>
       </aside>
 
-      <section className="min-h-[720px] overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-label="教学包内容工作区">
+      <section className="min-h-[440px] overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-label="教学包内容工作区">
         {loading ? <GeneratingState /> : active ? <>
           <div className="border-b border-slate-200 px-6 py-5 lg:px-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -418,7 +419,7 @@ export default function TeachingStudio() {
                 <Button icon={<PrinterOutlined />} onClick={printOrSavePdf}>打印 / 保存 PDF</Button>
               </div>
             </div>
-            <div className="mt-5 overflow-x-auto">
+            <p className="mt-4 text-sm text-slate-600">① 预览教师与学生版本　② 编辑并保存　③ 核对班级后发布</p><div className="mt-3 overflow-x-auto">
               <Segmented value={view} onChange={value => setView(value as ViewKey)} options={[
                 { label: "教师执行版", value: "teacher", icon: <ReadOutlined /> },
                 { label: "学生学习单", value: "student", icon: <FileTextOutlined /> },
@@ -457,7 +458,7 @@ export default function TeachingStudio() {
               <div className="teaching-markdown prose max-w-none text-[15px] leading-8 text-slate-700"><MathMarkdown>{view === "student" ? studentContent : content}</MathMarkdown></div>
             </>}
           </div>
-        </> : <EmptyTeachingState classrooms={classrooms} onGoClassrooms={() => navigate("/classrooms")} />}
+        </> : <EmptyTeachingState classrooms={classrooms} onGoClassrooms={() => navigate("/classrooms")} onChoose={topic=>{setupForm.setFieldsValue({topic});setupForm.submit();}} />}
       </section>
     </div>
   </div>{printing && active && <article className="teaching-print-document"><header><h1>{active.title}</h1><p>{view === "student" ? "学生学习单" : "教师执行版"} · {active.duration} 分钟</p></header><div className="teaching-markdown"><MathMarkdown>{view === "student" ? studentContent : content}</MathMarkdown></div></article>}{active && <Modal open={showPublishPreview} title="发布前确认" okText="确认发布" cancelText="返回修改" confirmLoading={publishing} onOk={publish} onCancel={() => setShowPublishPreview(false)}><div className="space-y-3 text-sm"><p><strong>班级：</strong>{selectedClassroom?.name || "未选择"}</p><p><strong>任务：</strong>{active.topic} · {publishSections.find(item => item.value === publishSection)?.label}</p><p><strong>题目：</strong>{publishQuestionIds(active).join("、") || "无"}</p><p><strong>提示策略：</strong>{publishSection === "exit" ? "全程无提示" : publishSection === "diagnostic" ? "允许提示" : "练习可提示，最后一道迁移题无提示"}</p><Alert type="info" showIcon message="确认后会立即出现在学生的“我的任务”中" /></div></Modal>}</>;
@@ -502,11 +503,12 @@ function GeneratingState() {
   </div>;
 }
 
-function EmptyTeachingState({ classrooms, onGoClassrooms }: { classrooms: Classroom[]; onGoClassrooms: () => void }) {
-  return <div className="flex min-h-[680px] flex-col items-center justify-center px-8 text-center">
+function EmptyTeachingState({ classrooms, onGoClassrooms, onChoose }: { classrooms: Classroom[]; onGoClassrooms: () => void; onChoose:(topic:string)=>void }) {
+  return <div className="flex min-h-[440px] flex-col items-start justify-center p-7">
     <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl text-slate-600"><ReadOutlined /></span>
     <h2 className="mt-5 text-lg font-extrabold text-slate-800">先生成一份可执行教学包</h2>
     <p className="mt-2 max-w-md text-sm leading-7 text-slate-600">只填写主题即可自动选题；关联班级后，还会把该班级与所选题目直接相关的作答证据写入教学决策。</p>
+    <div className="my-6 grid w-full gap-3">{["贝叶斯公式","正态分布","中心极限定理"].map(topic=><button key={topic} className="lesson-example" onClick={()=>onChoose(topic)}><strong>{topic} · 45 分钟</strong><span>从例题、练习到课堂检测</span><span className="text-teal-800">生成这份示例 →</span></button>)}</div>
     {!classrooms.length && <Button className="mt-4" onClick={onGoClassrooms} icon={<BankOutlined />}>先创建班级</Button>}
   </div>;
 }

@@ -10,7 +10,8 @@
     "test:ui": "node scripts/test-critical-ui.mjs",
     "test:e2e": "playwright test",
     "test:demo": "playwright test --config playwright.demo.config.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:experiments": "node --experimental-strip-types scripts/test-experiments.mjs"
   },
   "dependencies": {
     "@ant-design/v5-patch-for-react-19": "^1.0.3",

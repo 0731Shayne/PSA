@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Empty, Input, Progress, Radio, Segmented, Skeleton, Tag, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, BulbOutlined, CameraOutlined, CheckCircleOutlined, EyeOutlined, SendOutlined } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { MathMarkdown } from "@/components/MathMarkdown";
+import { useAuth } from "@/contexts/AuthContext";
+import { confirmUnsavedNavigation, setUnsavedChanges } from "@/utils/unsavedChanges";
 import { isDemoMode } from "@/demo/demoApi";
 
 interface Question {
@@ -45,6 +47,13 @@ interface Diagnostic {
   hint_count: number;
   submitted_late?: boolean;
   assignment_completed?: boolean;
+  answer?: string;
+  reasoning?: string;
+  image_data_url?: string;
+  image_name?: string;
+  input_mode?: string;
+  independent_eligible?: boolean;
+  grading_source?: string;
   ocr_text?: string;
   ocr_status?: "completed" | "failed" | "not_configured";
 }
@@ -57,6 +66,7 @@ const formulaKeys = [
 
 export default function TaskRunnerPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const assignmentId = Number(useParams().assignmentId);
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
@@ -76,6 +86,13 @@ export default function TaskRunnerPage() {
   const [submitting, setSubmitting] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [detailError, setDetailError] = useState(false);
+  const [detailRevision, setDetailRevision] = useState(0);
+  const [draftReady, setDraftReady] = useState("");
+  const [draftError, setDraftError] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
+  const submission = useRef<{ fingerprint: string; key: string } | null>(null);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     if (!Number.isInteger(assignmentId) || assignmentId <= 0) { setLoadError(true); setLoading(false); return; }
@@ -98,17 +115,55 @@ export default function TaskRunnerPage() {
   }, [assignmentId]);
 
   const currentId = assignment?.question_ids[index];
+  const draftKey = `psa:answer:${user?.id}:${assignmentId}:${currentId}`;
   useEffect(() => {
     if (!currentId) { setQuestion(null); return; }
     let active = true;
-    setDetailLoading(true);
-    setAnswer(""); setReasoning(""); setFile(null); setImageDataUrl(""); setHint(""); setDiagnostic(null); setShowAnswer(false); setInputMode("formula");
-    apiClient.get<Question>(`/api/question-bank/questions/${currentId}`, { params: { assignment_id: assignmentId } })
-      .then(response => { if (active) setQuestion(response.data); })
-      .catch(() => { if (active) { setQuestion(null); message.error("题目加载失败，请稍后重试"); } })
-      .finally(() => { if (active) setDetailLoading(false); });
-    return () => { active = false; };
-  }, [assignmentId, currentId]);
+    setDraftReady(""); setDetailLoading(true); setDetailError(false); setHistoryError(false);
+    let draft: {answer?:string; reasoning?:string; imageDataUrl?:string; inputMode?:string; file?:UploadFile; diagnostic?:Diagnostic; submission?:{fingerprint:string;key:string}} = {};
+    try { draft=JSON.parse(sessionStorage.getItem(draftKey) || "{}"); setDraftError(false); } catch { setDraftError(true); }
+    setAnswer(draft.answer || "");setReasoning(draft.reasoning || "");setImageDataUrl(draft.imageDataUrl || "");setFile(draft.file || null);
+    setInputMode(draft.inputMode || "formula");setDiagnostic(draft.diagnostic || null);submission.current=draft.submission || null;
+    setHint("");setShowAnswer(false);setDraftReady(draftKey);
+    apiClient.get<Question>(`/api/question-bank/questions/${currentId}`, {params:{assignment_id:assignmentId}})
+      .then(response=>{if(active)setQuestion(response.data);})
+      .catch(()=>{if(active){setQuestion(null);setDetailError(true);}})
+      .finally(()=>{if(active)setDetailLoading(false);});
+    apiClient.get<Diagnostic[]>("/api/question-bank/attempts", {params:{assignment_id:assignmentId,question_id:currentId,limit:1}})
+      .then(response=>{
+        if(!active)return;
+        const saved=response.data[0];
+        let currentDraft=draft;
+        try {currentDraft=JSON.parse(sessionStorage.getItem(draftKey) || "{}");} catch { /* Keep current fields if storage is unavailable. */ }
+        // Refresh teacher-reviewed feedback even when the original submitted draft remains.
+        if(saved && (currentDraft.answer || "").trim()===(saved.answer || "").trim()
+          && (currentDraft.reasoning || "").trim()===(saved.reasoning || "").trim()
+          && (currentDraft.imageDataUrl || "")===(saved.image_data_url || "")) setDiagnostic(saved);
+        if(saved && !currentDraft.answer && !currentDraft.reasoning && !currentDraft.imageDataUrl) {
+          setAnswer(saved.answer || "");setReasoning(saved.reasoning || "");setImageDataUrl(saved.image_data_url || "");setInputMode(saved.input_mode || "formula");setFile(saved.image_name?{uid:"saved",name:saved.image_name}:null);setDiagnostic(saved);
+        }
+      }).catch(()=>{if(active)setHistoryError(true);});
+    return ()=>{active=false;};
+  }, [assignmentId, currentId, draftKey, detailRevision]);
+
+  useEffect(()=>{
+    if(draftReady!==draftKey)return;
+    try {
+      sessionStorage.setItem(draftKey,JSON.stringify({answer,reasoning,imageDataUrl,inputMode,file:file?{uid:file.uid,name:file.name}:null,diagnostic,submission:submission.current}));
+      setDraftError(false);
+    } catch {setDraftError(true);}
+  },[answer,reasoning,imageDataUrl,inputMode,file,diagnostic,draftKey,draftReady]);
+  useEffect(()=>{
+    setUnsavedChanges(draftError || submitting);
+    const protect=(event:BeforeUnloadEvent)=>{if(draftError || inFlight.current){event.preventDefault();event.returnValue="";}};
+    window.addEventListener("beforeunload",protect);
+    return ()=>{setUnsavedChanges(false);window.removeEventListener("beforeunload",protect);};
+  },[draftError,submitting]);
+  function switchQuestion(next:number) {
+    if(inFlight.current)return;
+    if(draftError && !window.confirm("当前草稿未能保存，切换会丢失输入。确定切换吗？"))return;
+    setIndex(next);
+  }
 
   const completedCount = useMemo(() => assignment?.question_ids.filter(id => attempted.has(id)).length || 0, [assignment, attempted]);
   const expired = Boolean(assignment?.due_at && new Date(assignment.due_at).getTime() < Date.now());
@@ -127,25 +182,33 @@ export default function TaskRunnerPage() {
   }
 
   async function submitAttempt() {
-    if (!question) return;
+    if (!question || inFlight.current) return;
     if (!answer.trim() && !reasoning.trim() && !imageDataUrl) { message.warning("请先填写答案、描述思路或上传手写过程"); return; }
+    inFlight.current=true;
     setSubmitting(true);
+    const fingerprint=JSON.stringify({answer,reasoning,inputMode,imageDataUrl,imageName:file?.name,assignmentId,questionId:question.ID});
+    if(submission.current?.fingerprint!==fingerprint) submission.current={fingerprint,key:crypto.randomUUID()};
+    try {
+      const draft=JSON.parse(sessionStorage.getItem(draftKey) || "{}");
+      sessionStorage.setItem(draftKey,JSON.stringify({...draft,submission:submission.current}));
+    } catch {setDraftError(true);}
     try {
       const response = await apiClient.post<Diagnostic>(`/api/question-bank/questions/${question.ID}/attempts`, {
+        request_key: submission.current.key,
         answer,
         reasoning,
         input_mode: inputMode,
         image_name: file?.name,
         image_data_url: imageDataUrl,
         assignment_id: assignmentId,
-      }, { timeout: imageDataUrl ? 210_000 : 30_000 });
+      }, { timeout: imageDataUrl ? 210_000 : 45_000 });
       setDiagnostic(response.data);
       setAttempted(current => new Set(current).add(question.ID));
       message.success(response.data.assignment_completed ? "作答已保存，这项任务已完成" : "作答已保存");
     } catch (error: unknown) {
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       message.error(detail || "提交失败，请保留当前作答并稍后重试");
-    } finally { setSubmitting(false); }
+    } finally { inFlight.current=false;setSubmitting(false); }
   }
 
   async function revealAnswer() {
@@ -162,36 +225,38 @@ export default function TaskRunnerPage() {
   }
 
   if (loading) return <div className="space-y-5"><Skeleton active paragraph={{ rows: 3 }} /><Skeleton active paragraph={{ rows: 9 }} /></div>;
-  if (loadError || !assignment) return <Empty description="任务不存在、已撤回，或没有分配给你"><Button type="primary" onClick={() => navigate("/tasks")}>返回我的任务</Button></Empty>;
-  if (!assignment.question_ids.length) return <Empty description="这项任务暂时没有题目"><Button onClick={() => navigate("/tasks")}>返回我的任务</Button></Empty>;
+  if (loadError || !assignment) return <Empty description="任务不存在、已撤回，或没有分配给你"><Button type="primary" onClick={() => {if(confirmUnsavedNavigation())navigate("/tasks");}}>返回我的任务</Button></Empty>;
+  if (!assignment.question_ids.length) return <Empty description="这项任务暂时没有题目"><Button onClick={() => {if(confirmUnsavedNavigation())navigate("/tasks");}}>返回我的任务</Button></Empty>;
 
   return <div className="course-page task-runner-page mx-auto max-w-5xl">
     <div className="page-heading mb-5 flex flex-wrap items-start justify-between gap-4">
-      <div><Button type="link" className="!-ml-4" icon={<ArrowLeftOutlined />} onClick={() => navigate("/tasks")}>返回我的任务</Button><h1 className="text-2xl font-bold text-slate-950">{assignment.title}</h1><p className="mt-1 text-sm leading-6 text-slate-600">{assignment.classroom_name}{assignment.description ? ` · ${assignment.description}` : ""}</p></div>
+      <div><Button type="link" className="!-ml-4" icon={<ArrowLeftOutlined />} onClick={() => {if(confirmUnsavedNavigation())navigate("/tasks");}}>返回我的任务</Button><h1 className="text-2xl font-bold text-slate-950">{assignment.title}</h1><p className="mt-1 text-sm leading-6 text-slate-600">{assignment.classroom_name}{assignment.description ? ` · ${assignment.description}` : ""}</p></div>
       <div className="min-w-52"><div className="mb-1.5 flex justify-between text-sm text-slate-600"><span>任务进度</span><strong>{completedCount}/{assignment.question_ids.length}</strong></div><Progress percent={Math.round(completedCount / assignment.question_ids.length * 100)} showInfo={false} strokeColor="#0f766e" /></div>
     </div>
     {expired && <Alert className="mb-5" type="warning" showIcon message="任务已截止，但仍可补交" description="本次作答会保留并标记为截止后提交，教师可以在证据中区分。" />}
     <div className="mb-5 flex gap-2 overflow-x-auto pb-1" aria-label="任务题目进度">
-      {assignment.question_ids.map((id, itemIndex) => <button key={id} onClick={() => setIndex(itemIndex)} className={`min-w-24 rounded-lg border px-3 py-2 text-sm font-semibold ${itemIndex === index ? "border-teal-700 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-600"}`}>{attempted.has(id) && <CheckCircleOutlined className="mr-1 text-emerald-600" />}{itemIndex + 1}. {id}</button>)}
+      {assignment.question_ids.map((id, itemIndex) => <button key={id} disabled={submitting} onClick={() => switchQuestion(itemIndex)} className={`min-w-24 rounded-lg border px-3 py-2 text-sm font-semibold ${itemIndex === index ? "border-teal-700 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-600"}`}>{attempted.has(id) && <CheckCircleOutlined className="mr-1 text-emerald-600" />}{itemIndex + 1}. {id}</button>)}
     </div>
-    {detailLoading || !question ? <div className="border border-slate-200 bg-white p-6"><Skeleton active paragraph={{ rows: 8 }} /></div> : <div className="space-y-5">
+    {draftError && <Alert className="mb-3" type="warning" showIcon message="浏览器暂时无法保存草稿，请保留输入并完成提交" />}
+    {historyError && <Alert className="mb-3" type="warning" message="历史作答加载失败，当前输入仍保留" action={<Button onClick={()=>setDetailRevision(v=>v+1)}>重试历史</Button>} />}
+    {detailError ? <Alert type="error" showIcon message="题目加载失败" action={<Button onClick={()=>setDetailRevision(v=>v+1)}>重新加载题目</Button>} /> : detailLoading || !question ? <div className="border border-slate-200 bg-white p-6"><Skeleton active paragraph={{ rows: 8 }} /></div> : <div className="space-y-5">
       <section className="border border-slate-200 bg-white p-6 sm:p-8">
         <div className="mb-4 flex flex-wrap items-center gap-2"><Tag color="cyan">{question.ID}</Tag><Tag>{question.qtype}</Tag><Tag color={question.hard_level === "难" ? "red" : question.hard_level === "中" ? "orange" : "green"}>{question.hard_level}</Tag>{question.is_transfer && <Tag color="purple">无提示迁移验证</Tag>}</div>
         <div className="text-base leading-8 text-slate-800"><MathMarkdown>{question.question}</MathMarkdown></div>
         {question.choices && <div className="mt-4 space-y-2">{question.choices.map(item => <div key={item} className="rounded-lg bg-slate-50 px-4 py-2"><MathMarkdown>{item}</MathMarkdown></div>)}</div>}
       </section>
-      <section className="border border-slate-200 bg-white p-6 sm:p-8">
+      <section className="answer-workspace border border-slate-200 bg-white p-6 sm:p-8">
         <div className="mb-4"><h2 className="text-lg font-bold text-slate-900">提交你的作答</h2><p className="mt-1 text-sm text-slate-600">可以填写最终答案、描述思路，或上传手写过程。</p></div>
         <Segmented block value={inputMode} onChange={value => setInputMode(String(value))} options={[{ label: "公式 / 答案", value: "formula" }, { label: "描述思路", value: "reasoning" }, { label: "手写图片", value: "image" }]} />
-        <div className="mt-5">{question.qtype === "多选题" && question.choices ? <Checkbox.Group className="!grid !gap-3" options={question.choices.map(item => ({ label: <MathMarkdown>{item}</MathMarkdown>, value: item.match(/^\(\d+\)/)?.[0] || item }))} onChange={values => setAnswer(values.join("，"))} /> : question.qtype === "判断题" ? <Radio.Group value={answer} onChange={event => setAnswer(event.target.value)} options={[{ label: "正确", value: "正确" }, { label: "错误", value: "错误" }]} /> : inputMode === "formula" ? <><div className="mb-3 flex flex-wrap gap-2">{formulaKeys.map(([label, token]) => <Button key={label} size="small" onClick={() => setAnswer(value => value + token)}>{label}</Button>)}</div><Input.TextArea value={answer} onChange={event => setAnswer(event.target.value)} rows={3} maxLength={2000} showCount placeholder="输入最终答案或公式，例如：\\frac{1}{2}" />{answer && <div className="mt-3 bg-slate-50 p-4 text-center"><MathMarkdown>{`$$${answer}$$`}</MathMarkdown></div>}</> : inputMode === "reasoning" ? <Input.TextArea value={reasoning} onChange={event => setReasoning(event.target.value)} rows={6} maxLength={5000} showCount placeholder="描述你使用的公式、条件和关键步骤" /> : <div>{isDemoMode && <Alert className="mb-3" type="warning" showIcon message="演示版不会调用真实 OCR" />}<Upload.Dragger accept="image/jpeg,image/png,image/webp" maxCount={1} beforeUpload={upload => { if (upload.size > 2_000_000) { message.error("图片请控制在 2MB 以内"); return Upload.LIST_IGNORE; } setFile(upload); const reader = new FileReader(); reader.onload = () => setImageDataUrl(String(reader.result || "")); reader.readAsDataURL(upload); return false; }} onRemove={() => { setFile(null); setImageDataUrl(""); }} fileList={file ? [file] : []}><CameraOutlined className="text-2xl text-teal-700" /><p className="mt-2 font-semibold">上传手写过程照片</p><p className="text-sm text-slate-500">支持 JPG、PNG、WebP，2MB 以内</p></Upload.Dragger><Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="补充图片中的关键步骤或结论（推荐）" /></div>}</div>
+        <div className="mt-5">{question.qtype === "多选题" && question.choices ? <Checkbox.Group value={answer?answer.split("，"):[]} className="!grid !gap-3" options={question.choices.map(item => ({ label: <MathMarkdown>{item}</MathMarkdown>, value: item.match(/^\(\d+\)/)?.[0] || item }))} onChange={values => setAnswer(values.join("，"))} /> : question.qtype === "判断题" ? <Radio.Group value={answer} onChange={event => setAnswer(event.target.value)} options={[{ label: "正确", value: "正确" }, { label: "错误", value: "错误" }]} /> : inputMode === "formula" ? <><div className="mb-3 flex flex-wrap gap-2">{formulaKeys.map(([label, token]) => <Button key={label} size="small" onClick={() => setAnswer(value => value + token)}>{label}</Button>)}</div><Input.TextArea aria-label="作答答案" value={answer} onChange={event => setAnswer(event.target.value)} rows={3} maxLength={2000} showCount placeholder="输入最终答案或公式，例如：\\frac{1}{2}" />{answer && <div className="mt-3 bg-slate-50 p-4 text-center"><MathMarkdown>{`$$${answer}$$`}</MathMarkdown></div>}</> : inputMode === "reasoning" ? <Input.TextArea aria-label="作答思路" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={6} maxLength={5000} showCount placeholder="描述你使用的公式、条件和关键步骤" /> : <div>{isDemoMode && <Alert className="mb-3" type="warning" showIcon message="演示版不会调用真实 OCR" />}<Upload.Dragger accept="image/jpeg,image/png,image/webp" maxCount={1} beforeUpload={upload => { if (upload.size > 2_000_000) { message.error("图片请控制在 2MB 以内"); return Upload.LIST_IGNORE; } setFile(upload); const reader = new FileReader(); reader.onload = () => setImageDataUrl(String(reader.result || "")); reader.readAsDataURL(upload); return false; }} onRemove={() => { setFile(null); setImageDataUrl(""); }} fileList={file ? [file] : []}><CameraOutlined className="text-2xl text-teal-700" /><p className="mt-2 font-semibold">上传手写过程照片</p><p className="text-sm text-slate-500">支持 JPG、PNG、WebP，2MB 以内</p></Upload.Dragger>{imageDataUrl && <img className="mt-3 max-h-72 max-w-full object-contain" src={imageDataUrl} alt="已保存的手写作答"/>}<Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="补充图片中的关键步骤或结论（推荐）" /></div>}</div>
         {inputMode !== "reasoning" && question.qtype !== "判断题" && question.qtype !== "多选题" && <Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="可选：用自然语言描述你的解题思路" />}
-        {hintBlocked && <Alert className="mt-4" type="info" showIcon message="本题不提供提示" description="这是独立迁移证据，提交后仍可查看诊断反馈和参考解析。" />}
+        {draftReady === draftKey && !draftError && <p className="mt-3 text-sm text-slate-500" role="status">草稿已保存在当前浏览器标签页，切题或刷新后可恢复</p>}{submitting && <p className="mt-3 text-sm" role="status">正在保存与检查作答，请稍候；重试不会产生重复记录。</p>}{hintBlocked && <Alert className="mt-4" type="info" showIcon message="本题不提供提示" description="仅首次、未受辅助的新题作答可用于独立验证；看过解析后再次答对会记为订正。" />}
         {hint && <Alert className="mt-4" type="info" showIcon message="启发提示" description={<MathMarkdown>{hint}</MathMarkdown>} />}
-        {diagnostic && <Alert className="mt-4" type={diagnostic.verdict === "correct" ? "success" : diagnostic.verdict === "incorrect" ? "error" : "warning"} showIcon message={diagnostic.verdict === "correct" ? `第 ${diagnostic.attempt_no} 次作答正确` : `第 ${diagnostic.attempt_no} 次作答诊断`} description={<div><MathMarkdown>{diagnostic.feedback}</MathMarkdown>{diagnostic.error_type && <Tag className="mt-2" color="orange">{diagnostic.error_type}</Tag>}{diagnostic.submitted_late && <Tag className="mt-2" color="red">截止后提交</Tag>}</div>} />}
-        <div className="mt-5 flex flex-wrap gap-3"><Button icon={<BulbOutlined />} loading={hintLoading} disabled={hintBlocked} onClick={requestHint}>给我一个提示</Button><Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={submitAttempt}>提交检查</Button></div>
+        {diagnostic && <Alert className="mt-4" type={diagnostic.verdict === "correct" ? "success" : diagnostic.verdict === "incorrect" ? "error" : "warning"} showIcon message={diagnostic.verdict === "correct" ? `第 ${diagnostic.attempt_no} 次作答正确` : `第 ${diagnostic.attempt_no} 次作答${diagnostic.verdict === "needs_review" ? "已保存 · 待复核" : "诊断"}`} description={<div><MathMarkdown>{diagnostic.feedback}</MathMarkdown>{diagnostic.verdict === "needs_review" && <p className="mt-2">暂未得到可靠判断，不计入掌握度或风险预警。</p>}{diagnostic.error_type && <Tag className="mt-2" color="orange">{diagnostic.error_type}</Tag>}{diagnostic.submitted_late && <Tag className="mt-2" color="red">截止后提交</Tag>}</div>} />}
+        <div className="answer-actions mt-5 flex flex-wrap gap-3"><Button icon={<BulbOutlined />} loading={hintLoading} disabled={hintBlocked} onClick={requestHint}>给我一个提示</Button><Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={submitAttempt}>提交检查</Button></div>
       </section>
       {showAnswer ? <section className="grid gap-4 md:grid-cols-2"><Block title="参考答案" text={question.answer || "暂无"} tone="green" /><Block title="详细解析" text={question.explanation || "暂无"} tone="blue" /></section> : <Button block size="large" icon={<EyeOutlined />} loading={revealing} onClick={revealAnswer}>{question.can_reveal || diagnostic ? "查看答案与解析" : "先完成这道题，再查看答案"}</Button>}
-      <div className="flex justify-between gap-3"><Button icon={<ArrowLeftOutlined />} disabled={index === 0} onClick={() => setIndex(value => Math.max(0, value - 1))}>上一题</Button>{index < assignment.question_ids.length - 1 ? <Button type="primary" onClick={() => setIndex(value => Math.min(assignment.question_ids.length - 1, value + 1))}>下一题 <ArrowRightOutlined /></Button> : <Button type="primary" onClick={() => navigate("/tasks")}>{completedCount === assignment.question_ids.length ? "完成并返回任务列表" : "返回任务列表"}</Button>}</div>
+      <div className="flex justify-between gap-3"><Button aria-label="上一题" icon={<ArrowLeftOutlined />} disabled={index === 0 || submitting} onClick={() => switchQuestion(Math.max(0,index-1))}>上一题</Button>{index < assignment.question_ids.length - 1 ? <Button aria-label="下一题" type="primary" disabled={submitting} onClick={() => switchQuestion(Math.min(assignment.question_ids.length-1,index+1))}>下一题 <ArrowRightOutlined /></Button> : <Button type="primary" onClick={() => {if(confirmUnsavedNavigation())navigate("/tasks");}}>{completedCount === assignment.question_ids.length ? "完成并返回任务列表" : "返回任务列表"}</Button>}</div>
     </div>}
   </div>;
 }

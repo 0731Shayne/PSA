@@ -13,6 +13,15 @@ export default defineConfig({
   build: {
     outDir: "../backend/static",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/@ant-design/icons") || id.includes("/node_modules/@ant-design/icons-svg")) return "icons-vendor";
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react-vendor";
+          if (/node_modules\/(react-router|react-router-dom)\//.test(id)) return "router-vendor";
+        },
+      },
+    },
   },
   server: {
     host: "0.0.0.0",

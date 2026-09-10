@@ -57,6 +57,11 @@ async def ensure_local_sqlite_compatibility(connection: AsyncConnection) -> None
         )
 
     ocr_additions = {
+        "request_key": "VARCHAR(64)",
+        "request_hash": "VARCHAR(64)",
+        "independent_eligible": "BOOLEAN NOT NULL DEFAULT 0",
+        "grading_source": "VARCHAR(64)",
+        "grading_version": "VARCHAR(32)",
         "ocr_text": "TEXT",
         "ocr_provider": "VARCHAR(32)",
         "ocr_status": "VARCHAR(24)",
@@ -74,6 +79,15 @@ async def ensure_local_sqlite_compatibility(connection: AsyncConnection) -> None
             "ON question_attempts (assignment_id)"
         )
     )
+
+    if "user_id" in columns:
+        await connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_attempt_request ON question_attempts (user_id, request_key)"))
+    if "user_id" in columns and "question_id" in columns:
+        await connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_first_independent_attempt ON question_attempts (user_id, question_id) WHERE independent_eligible = true"))
+    experiment_columns = await connection.run_sync(table_columns, "experiment_records")
+    for column_name, definition in {"seed": "INTEGER", "algorithm_version": "VARCHAR(32)"}.items():
+        if experiment_columns and column_name not in experiment_columns:
+            await connection.execute(text(f"ALTER TABLE experiment_records ADD COLUMN {column_name} {definition}"))
 
     teaching_columns = await connection.run_sync(table_columns, "teaching_plans")
     if not teaching_columns:

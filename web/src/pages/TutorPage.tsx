@@ -54,12 +54,13 @@ export default function TutorPage() {
   const [showAnswer, setShowAnswer] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const requestController = useRef<AbortController | null>(null);
+  const historyRequest = useRef(0);
 
   useEffect(() => {
     apiClient.get<Session[]>("/api/question-bank/sessions")
       .then(async res => {
         setSessions(res.data);
-        if (!initialPrompt && res.data.length) await openSession(res.data[0].id);
+        if (!initialPrompt && res.data.length && historyRequest.current === 0) { const requested=Number(search.get("session")); await openSession(res.data.some(s=>s.id===requested)?requested:res.data[0].id); }
       })
       .catch(() => setHistoryError(true))
       .finally(() => setHistoryLoading(false));
@@ -76,18 +77,24 @@ export default function TutorPage() {
 
   async function openSession(id: number) {
     if (loading) return;
+    const requestId = ++historyRequest.current;
     setHistoryLoading(true);
     try {
       const res = await apiClient.get<{ session: Session; messages: Msg[] }>(`/api/question-bank/sessions/${id}/messages`);
+      if (requestId !== historyRequest.current) return;
+      setSettingsOpen(false);
       setActiveSession(id);
       setMode(res.data.session.mode === "recommend" ? "recommend" : "answer");
       setMessages(res.data.messages);
       setHistoryError(false);
-    } catch { toast.error("会话加载失败，请稍后重试"); } finally { setHistoryLoading(false); }
+    } catch { if(requestId===historyRequest.current)toast.error("会话加载失败，请稍后重试"); } finally { if(requestId===historyRequest.current)setHistoryLoading(false); }
   }
 
   function newChat() {
     if (loading) return;
+    historyRequest.current++;
+    setHistoryLoading(false);
+    setSettingsOpen(false);
     setActiveSession(null);
     setMessages([]);
     setInput("");

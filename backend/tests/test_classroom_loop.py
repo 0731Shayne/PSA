@@ -423,7 +423,10 @@ async def test_password_change_revokes_existing_tokens(api):
     assert revoked.status_code == 401
 
 
-async def test_experiment_history_updates_learning_path_and_can_be_deleted(api):
+async def test_experiment_history_updates_learning_path_and_can_be_deleted(api, monkeypatch):
+    async def diagnosed(*args, **kwargs):
+        return {"verdict": "incorrect", "feedback": "条件方向需要重新检查", "error_type": "公式选择错误"}
+    monkeypatch.setattr(LLMClient, "chat_json", diagnosed)
     client, _teacher_token, student_token = api
     headers = {"Authorization": f"Bearer {student_token}"}
     bayes_question = next(row for row in load_questions() if "贝叶斯公式" in row["keypoint"])

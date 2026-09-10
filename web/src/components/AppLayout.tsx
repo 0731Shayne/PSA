@@ -80,21 +80,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${/^\/tasks\/\d+/.test(location.pathname) ? "task-focus-shell" : ""}`}>
       <a href="#main-content" className="skip-link">跳到主要内容</a>
       <aside className="app-sidebar">
         <div className="px-5 py-6">{brand}</div>
         <div className="course-library-card mx-4 mb-4 rounded-2xl p-3.5">
-          <div className="course-card-index">COURSE · 01</div>
+          <div className="course-card-index">课程资源</div>
           <div className="course-card-title">专属课程题库</div>
           <p>1007 道概率统计题目与解析</p>
         </div>
-        <p className="sidebar-section-label px-6 pb-2 pt-2">课程空间 / CONTENTS</p>
+        <p className="sidebar-section-label px-6 pb-2 pt-2">课程导航</p>
         <Menu mode="inline" selectedKeys={[current.path]} items={menuItems} onClick={selectMenu} className="app-menu" />
         <div className="mt-auto p-4">
           <div className="study-tip rounded-2xl p-4">
             <p className="study-tip-label">课堂札记</p>
-            <p className="study-tip-copy">先尝试自己作答，再选择提示，学习效果会更好。</p>
+            <p className="study-tip-copy">{teacher ? "先查看作答依据，再安排下一次练习。" : "先独立作答，再用提示检查思路。"}</p>
             <button onClick={() => go("/tutor")} className="study-tip-link">开始提问 <RightOutlined className="text-xs" /></button>
           </div>
         </div>

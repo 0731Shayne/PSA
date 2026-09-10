@@ -65,7 +65,6 @@ VERDICT_SCORE = {
     "correct": 1.0,
     "partial": 0.62,
     "incorrect": 0.12,
-    "needs_review": 0.35,
 }
 
 DIFFICULTY_ORDER = {"易": 0, "中": 1, "难": 2}
@@ -118,14 +117,19 @@ def build_learning_profile(
     evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
     attempted_question_ids: set[str] = set()
 
-    # Callers provide newest-first attempts.  Recency and repeated recovery both
-    # remain visible instead of reducing a question to a single binary result.
+    submitted_attempts = attempts
+    attempts = [item for item in attempts if item.get("verdict") in VERDICT_SCORE]
+    # Repeated corrections remain in history, but cannot multiply evidence weight.
+    seen_questions: set[str] = set()
     for index, attempt in enumerate(attempts):
         question_id = str(attempt.get("question_id") or "")
         row = lookup.get(question_id)
         if not row:
             continue
         attempted_question_ids.add(question_id)
+        if question_id in seen_questions:
+            continue
+        seen_questions.add(question_id)
         recency_weight = max(0.45, 1.0 - index * 0.012)
         for keypoint in row.get("keypoint") or []:
             evidence[str(keypoint)].append(
@@ -143,7 +147,7 @@ def build_learning_profile(
         total_weight = sum(item["weight"] for item in items) or 1
         score = round(100 * sum(item["value"] * item["weight"] for item in items) / total_weight)
         questions = {item["question_id"] for item in items}
-        confidence = min(100, round(len(questions) / 5 * 100 + min(len(items) - len(questions), 3) * 6))
+        confidence = min(90, round(100 * len(questions) / (len(questions) + 3)))
         error_counts = Counter(
             str(item.get("error_type")) for item in items if item.get("error_type")
         )
@@ -212,6 +216,7 @@ def build_learning_profile(
     risk_candidates = [item for item in mastery if item["status"] == "at_risk"]
     risk_candidates.sort(
         key=lambda item: (
+            item["questions"] < 2,
             item["score"],
             -len(PREREQUISITES.get(item["name"], [])),
             -len(item["name"]),
@@ -287,6 +292,10 @@ def build_learning_profile(
         },
         "evidence": {
             "attempts": len(attempts),
+            "submitted_attempts": len(submitted_attempts),
+            "pending_review": sum(item.get("verdict") == "needs_review" for item in submitted_attempts),
+            "corrections": sum(int(item.get("attempt_no") or 1) > 1 for item in attempts),
+            "confidence_note": "证据充足度为规则估计，按不同题目计算，不是统计概率；重复订正不增加题目数。",
             "questions": len(attempted_question_ids),
             "keypoints": assessed,
         },
@@ -326,7 +335,7 @@ def build_teaching_insights(
 ) -> dict[str, Any]:
     row_ids = {str(row.get("ID")) for row in rows}
     keypoints = sorted({str(kp) for row in rows for kp in (row.get("keypoint") or [])})
-    diagnostics = [item for item in attempts if str(item.get("question_id")) in row_ids]
+    diagnostics = [item for item in attempts if str(item.get("question_id")) in row_ids and item.get("verdict") in VERDICT_SCORE]
     verdicts = Counter(str(item.get("verdict")) for item in diagnostics)
     errors = Counter(str(item.get("error_type")) for item in diagnostics if item.get("error_type"))
     layers = {

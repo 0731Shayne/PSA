@@ -32,7 +32,7 @@ interface RiskAlert {
   title: string;
   message: string;
   recommendation: string;
-  evidence: { attempts: number; questions: number; hints: number; top_error?: string };
+  evidence: { pending_review?: number; confidence_note?: string; attempts: number; questions: number; hints: number; top_error?: string };
 }
 
 interface PathStep {
@@ -57,13 +57,13 @@ interface LearningProfile {
     next_focus: string;
     evidence_level: "low" | "medium" | "high";
   };
-  evidence: { attempts: number; questions: number; keypoints: number };
+  evidence: { pending_review?: number; confidence_note?: string; attempts: number; questions: number; keypoints: number };
   mastery: Mastery[];
   alerts: RiskAlert[];
   path: PathStep[];
 }
 
-const evidenceLabel = { low: "证据积累中", medium: "中等可信", high: "高可信" };
+const evidenceLabel = { low: "证据积累中", medium: "证据积累中", high: "证据较充分" };
 const statusLabel = { mastered: "已掌握", developing: "发展中", at_risk: "需巩固" };
 
 export default function LearningPathPage() {
@@ -96,7 +96,7 @@ export default function LearningPathPage() {
       <div className="grid gap-8 px-6 py-8 sm:px-8 lg:grid-cols-[1fr_340px] lg:px-10 lg:py-10">
         <div className="max-w-3xl">
           <div className="mb-3 flex flex-wrap items-center gap-2"><Tag color="cyan" className="!m-0">{evidenceLabel[profile.summary.evidence_level]}</Tag><span className="text-sm text-slate-600">基于 {profile.evidence.questions} 道题、{profile.evidence.attempts} 次作答</span></div>
-          <span className="page-index">LEARNING ROUTE · EVIDENCE UPDATED</span><h1 className="text-3xl font-black leading-tight text-slate-950">下一步，先学好“{profile.summary.next_focus}”</h1>
+          <span className="page-index">学习建议</span><h1 className="text-3xl font-black leading-tight text-slate-950">下一步，先学好“{profile.summary.next_focus}”</h1>
           <p className="mt-3 max-w-2xl text-[15px] leading-7 text-slate-600">路径依据题库知识点、作答结果、错误类型和提示使用情况生成。每完成一组题，掌握度和后续顺序都会更新。</p>
           <Button className="!mt-6" type="primary" size="large" onClick={() => profile.path[0]?.question_ids[0] ? navigate(`/questions?query=${profile.path[0].question_ids[0]}&task=1`) : navigate("/questions")}>
             开始当前任务 <ArrowRightOutlined />
@@ -109,6 +109,7 @@ export default function LearningPathPage() {
       </div>
     </header>
 
+    {Boolean(profile.evidence.pending_review) && <Alert className="mt-4" type="info" showIcon message={`${profile.evidence.pending_review} 份作答待复核，暂不影响掌握度与风险`} />}
     {noEvidence && <Alert className="mt-6" type="info" showIcon message="先完成第一组基础诊断" description="目前还没有作答证据，系统已从样本空间开始安排基础题。完成后会生成你的第一份掌握度画像。" />}
 
     <div className="mt-6 grid items-start gap-6 xl:grid-cols-[1.1fr_.9fr]">
@@ -127,7 +128,7 @@ export default function LearningPathPage() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-labelledby="warning-heading">
-        <div className="border-b border-slate-200 px-6 py-5"><h2 id="warning-heading" className="flex items-center gap-2 text-lg font-extrabold text-slate-900"><WarningOutlined className="text-amber-600" />认知断层预警</h2><p className="mt-1 text-sm text-slate-600">只在至少有两次相关作答时发出，避免凭一次失误下结论。</p></div>
+        <div className="border-b border-slate-200 px-6 py-5"><h2 id="warning-heading" className="flex items-center gap-2 text-lg font-extrabold text-slate-900"><WarningOutlined className="text-amber-600" />认知断层预警</h2><p className="mt-1 text-sm text-slate-600">至少基于两道不同题目的有效判断；同题订正不会增加证据题数。</p></div>
         {profile.alerts.length === 0 ? <Empty className="!my-10" image={Empty.PRESENTED_IMAGE_SIMPLE} description={noEvidence ? "完成诊断题后生成预警" : "暂未发现需要预警的知识断层"} /> : <div className="divide-y divide-slate-100">{profile.alerts.map(alert => <article key={`${alert.keypoint}-${alert.title}`} className="px-6 py-5">
           <div className="flex items-start justify-between gap-3"><h3 className="font-extrabold text-slate-900">{alert.title}</h3><Tag color={alert.severity === "high" ? "red" : alert.severity === "medium" ? "orange" : "blue"}>{alert.severity === "high" ? "高风险" : alert.severity === "medium" ? "需关注" : "提示"}</Tag></div>
           <div className="mt-2 text-sm leading-6 text-slate-600"><MathMarkdown>{alert.message}</MathMarkdown></div>
@@ -138,11 +139,11 @@ export default function LearningPathPage() {
     </div>
 
     <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white" aria-labelledby="mastery-heading">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 px-6 py-5"><div><h2 id="mastery-heading" className="flex items-center gap-2 text-lg font-extrabold text-slate-900"><SafetyCertificateOutlined className="text-teal-700" />知识点掌握度</h2><p className="mt-1 text-sm text-slate-600">掌握度反映表现，置信度反映证据是否充足，两者需一起看。</p></div>{profile.mastery.length > 8 && <Button type="link" onClick={() => setShowAll(value => !value)}>{showAll ? "收起" : `查看全部 ${profile.mastery.length} 个`}</Button>}</div>
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 px-6 py-5"><div><h2 id="mastery-heading" className="flex items-center gap-2 text-lg font-extrabold text-slate-900"><SafetyCertificateOutlined className="text-teal-700" />知识点掌握度</h2><p className="mt-1 text-sm text-slate-600">掌握度反映近期表现；证据充足度按不同题目估计，不是统计概率。</p></div>{profile.mastery.length > 8 && <Button type="link" onClick={() => setShowAll(value => !value)}>{showAll ? "收起" : `查看全部 ${profile.mastery.length} 个`}</Button>}</div>
       {visibleMastery.length === 0 ? <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center"><BookOutlined className="text-2xl text-slate-400" /><p className="mt-3 font-bold text-slate-700">还没有可计算的知识点</p><Button className="mt-2" type="link" onClick={() => navigate("/questions")}>去完成基础题</Button></div> : <div className="grid md:grid-cols-2">{visibleMastery.map(item => <button key={item.id + item.name} onClick={() => navigate(`/questions?keypoint=${encodeURIComponent(item.name)}`)} className="border-b border-slate-100 px-6 py-5 text-left transition hover:bg-teal-50/60 md:odd:border-r">
         <div className="flex items-center justify-between gap-3"><span className="font-extrabold text-slate-800">{item.name}</span><Tag color={item.status === "mastered" ? "green" : item.status === "developing" ? "blue" : "orange"}>{statusLabel[item.status]}</Tag></div>
         <Progress className="!mb-0 !mt-3" percent={item.score} size="small" strokeColor={item.status === "mastered" ? "#16a34a" : item.status === "at_risk" ? "#d97706" : "#0f766e"} />
-        <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm text-slate-500"><span>置信度 {item.confidence}% · {item.questions} 道题</span><span>{item.top_error ? `主要问题：${item.top_error}` : item.trend === "up" ? "趋势上升" : "表现稳定"}</span></div>
+        <div className="mt-2 flex flex-wrap justify-between gap-2 text-sm text-slate-500"><span>证据充足度 {item.confidence}% · {item.questions} 道题</span><span>{item.top_error ? `主要问题：${item.top_error}` : item.trend === "up" ? "趋势上升" : "表现稳定"}</span></div>
       </button>)}</div>}
     </section>
   </div>;

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, false, func, true
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index, text, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .session import Base
@@ -239,6 +239,18 @@ class QuestionAttempt(Base):
     """A student's submitted answer and its grounded diagnostic result."""
 
     __tablename__ = "question_attempts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_key", name="uq_attempt_request"),
+        Index("uq_first_independent_attempt", "user_id", "question_id", unique=True,
+              sqlite_where=text("independent_eligible = true"),
+              postgresql_where=text("independent_eligible = true")),
+    )
+
+    request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    independent_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    grading_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    grading_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -268,6 +280,9 @@ class ExperimentRecord(Base):
 
     __tablename__ = "experiment_records"
 
+    seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    algorithm_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     experiment_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -288,4 +303,14 @@ class HintEvent(Base):
         ForeignKey("learning_assignments.id", ondelete="SET NULL"), nullable=True, index=True
     )
     question_id: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LearningSupportEvent(Base):
+    """Global per-question exposure: moving between tasks cannot erase assistance."""
+    __tablename__ = "learning_support_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    question_id: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

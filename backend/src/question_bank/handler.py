@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import asyncio
+import hashlib
 import re
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -10,6 +12,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import load_only
 
 from ..auth.handler import get_current_user
 from ..db.models import ChatMessage as StoredChatMessage
@@ -21,6 +25,7 @@ from ..db.models import (
     ExperimentRecord,
     HintEvent,
     LearningAssignment,
+    LearningSupportEvent,
     QuestionAttempt,
     TeachingPlan,
     User,
@@ -47,6 +52,8 @@ from .service import (
 )
 from .teaching_package import LEARNER_PROFILES, LESSON_TYPES, build_teaching_package
 
+
+from .grading import compare_answers, GRADING_VERSION
 
 router = APIRouter()
 
@@ -77,6 +84,7 @@ class ChatSessionCreateRequest(BaseModel):
 
 
 class AttemptRequest(BaseModel):
+    request_key: str | None = Field(default=None, min_length=8, max_length=64)
     answer: str = Field(default="", max_length=2000)
     reasoning: str = Field(default="", max_length=5000)
     input_mode: Literal["formula", "reasoning", "image"] = "formula"
@@ -97,6 +105,8 @@ class AssistantRequest(BaseModel):
 
 
 class ExperimentRunRequest(BaseModel):
+    seed: int | None = Field(default=None, ge=1, le=2_147_483_646)
+    algorithm_version: str | None = Field(default=None, max_length=32)
     experiment_id: str = Field(min_length=1, max_length=64)
     parameters: dict[str, Any] = Field(default_factory=dict)
     result_summary: str = Field(min_length=1, max_length=5000)
@@ -331,6 +341,7 @@ def _attempt_analytics_payload(attempt: QuestionAttempt) -> dict[str, Any]:
         "error_type": attempt.error_type,
         "hint_count": attempt.hint_count,
         "attempt_no": attempt.attempt_no,
+        "independent_eligible": attempt.independent_eligible,
         "created_at": attempt.created_at.isoformat() if attempt.created_at else None,
     }
 
@@ -471,7 +482,7 @@ async def learning_summary(
     if session_ids:
         messages = (
             await db.execute(
-                select(StoredChatMessage)
+                select(StoredChatMessage).options(load_only(StoredChatMessage.sources_json))
                 .where(
                     StoredChatMessage.session_id.in_(session_ids),
                     StoredChatMessage.role == "assistant",
@@ -491,19 +502,15 @@ async def learning_summary(
                 question_ids.add(source["ID"])
             for keypoint in source.get("keypoint") or []:
                 keypoints[keypoint] = keypoints.get(keypoint, 0) + 1
-    attempts = (
-        await db.execute(
-            select(QuestionAttempt)
-            .where(QuestionAttempt.user_id == user.id)
-            .order_by(QuestionAttempt.id.desc())
-        )
-    ).scalars().all()
-    attempted_ids = {item.question_id for item in attempts}
-    correct_ids = {item.question_id for item in attempts if item.verdict == "correct"}
-    error_types: dict[str, int] = {}
-    for item in attempts:
-        if item.error_type:
-            error_types[item.error_type] = error_types.get(item.error_type, 0) + 1
+    base_filter = QuestionAttempt.user_id == user.id
+    totals = (await db.execute(select(
+        func.count(QuestionAttempt.id), func.count(func.distinct(QuestionAttempt.question_id))
+    ).where(base_filter))).one()
+    graded_ids = await db.scalar(select(func.count(func.distinct(QuestionAttempt.question_id))).where(base_filter, QuestionAttempt.verdict.in_(("correct", "partial", "incorrect"))))
+    correct_count = await db.scalar(select(func.count(func.distinct(QuestionAttempt.question_id))).where(base_filter, QuestionAttempt.verdict == "correct"))
+    pending_review = await db.scalar(select(func.count(QuestionAttempt.id)).where(base_filter, QuestionAttempt.verdict == "needs_review"))
+    error_types = dict((await db.execute(select(QuestionAttempt.error_type, func.count(QuestionAttempt.id)).where(
+        base_filter, QuestionAttempt.error_type.is_not(None), QuestionAttempt.verdict != "needs_review").group_by(QuestionAttempt.error_type))).all())
     experiment_runs = (
         await db.execute(
             select(func.count(ExperimentRecord.id)).where(ExperimentRecord.user_id == user.id)
@@ -513,9 +520,11 @@ async def learning_summary(
         "sessions": len(sessions),
         "questions_seen": len(question_ids),
         "assistant_answers": len(messages),
-        "attempts": len(attempts),
-        "attempted_questions": len(attempted_ids),
-        "correct_questions": len(correct_ids),
+        "attempts": totals[0],
+        "attempted_questions": totals[1],
+        "graded_questions": graded_ids,
+        "pending_review": pending_review,
+        "correct_questions": correct_count,
         "experiment_runs": experiment_runs,
         "error_types": [
             {"name": name, "count": count}
@@ -536,7 +545,7 @@ async def learning_profile(
 ):
     attempts = (
         await db.execute(
-            select(QuestionAttempt)
+            select(QuestionAttempt).options(load_only(QuestionAttempt.question_id, QuestionAttempt.user_id, QuestionAttempt.assignment_id, QuestionAttempt.verdict, QuestionAttempt.error_type, QuestionAttempt.hint_count, QuestionAttempt.attempt_no, QuestionAttempt.independent_eligible, QuestionAttempt.created_at))
             .where(QuestionAttempt.user_id == user.id)
             .order_by(QuestionAttempt.id.desc())
         )
@@ -573,7 +582,7 @@ async def teaching_insights(
     if not rows:
         raise HTTPException(status_code=400, detail="请提供教学主题或题号")
     attempt_query = (
-        select(QuestionAttempt)
+        select(QuestionAttempt).options(load_only(QuestionAttempt.question_id, QuestionAttempt.user_id, QuestionAttempt.assignment_id, QuestionAttempt.verdict, QuestionAttempt.error_type, QuestionAttempt.hint_count, QuestionAttempt.attempt_no, QuestionAttempt.independent_eligible, QuestionAttempt.created_at))
         .join(LearningAssignment, LearningAssignment.id == QuestionAttempt.assignment_id)
         .join(Classroom, Classroom.id == LearningAssignment.classroom_id)
         .where(Classroom.teacher_id == user.id)
@@ -678,6 +687,9 @@ async def reveal_question_answer(
         if not attempted:
             detail = "请先完成当前任务中的这道题，再查看答案与解析" if assignment else "请先提交一次作答，再查看答案与解析"
             raise HTTPException(status_code=403, detail=detail)
+    if not _is_teacher(user):
+        db.add(LearningSupportEvent(user_id=user.id, question_id=question_id, kind="answer"))
+        await db.commit()
     return compact_question(row, include_answer=True) | {
         "teacher_view": _is_teacher(user),
         "can_reveal": True,
@@ -704,6 +716,15 @@ async def question_hint(
             assignment.hint_policy == "blocked" or assignment.transfer_question_id == question_id
         ):
             raise HTTPException(status_code=409, detail="这道题用于无提示独立验证，当前不能使用提示")
+    # Record support before generating it so a simultaneous submission cannot look unaided.
+    db.add(
+        HintEvent(
+            user_id=user.id,
+            assignment_id=assignment.id if assignment else None,
+            question_id=question_id,
+        )
+    )
+    await db.commit()
     answer = payload.answer.strip()
     reasoning = payload.reasoning.strip()
     prompt = (
@@ -713,22 +734,14 @@ async def question_hint(
         "只给一个能推动下一步的提示，不得直接公布答案，控制在80字以内。"
     )
     try:
-        hint = await LLMClient(name="answer_hint").chat(
+        hint = await asyncio.wait_for(LLMClient(name="answer_hint").chat(
             [ChatMessage("user", prompt)],
             system=f"你是启发式概率统计教师，只提供最小必要提示。{MATH_MARKDOWN_RULE}",
             max_tokens=256,
-        )
+        ), timeout=20)
     except Exception:
         keypoint = "、".join(row.get("keypoint") or [])
         hint = f"先明确这道题涉及的事件和已知条件，再判断应使用哪个公式。重点回顾：{keypoint}。"
-    db.add(
-        HintEvent(
-            user_id=user.id,
-            assignment_id=assignment.id if assignment else None,
-            question_id=question_id,
-        )
-    )
-    await db.commit()
     return {"hint": hint}
 
 
@@ -742,6 +755,19 @@ async def submit_question_attempt(
     row = get_question(question_id)
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
+    user_id = user.id
+    request_hash = hashlib.sha256(json.dumps({"question_id": question_id, **payload.model_dump(exclude={"request_key", "hint_count"})}, sort_keys=True).encode()).hexdigest()
+    async def previous_response():
+        saved = await db.scalar(select(QuestionAttempt).where(QuestionAttempt.user_id == user_id, QuestionAttempt.request_key == payload.request_key))
+        if saved is None:
+            return None
+        if saved.request_hash != request_hash:
+            raise HTTPException(status_code=409, detail="此提交编号已用于另一份作答，请重新提交")
+        return await _saved_attempt_response(db, saved)
+    if payload.request_key:
+        previous = await previous_response()
+        if previous is not None:
+            return previous
     answer = payload.answer.strip()
     reasoning = payload.reasoning.strip()
     image_name = (payload.image_name or "").strip()
@@ -811,9 +837,18 @@ async def submit_question_attempt(
         "error_type从概念混淆、条件遗漏、公式选择错误、计算错误、表达不完整、无中选择。"
     )
     result: dict[str, Any] = {}
-    if answer or reasoning or ocr_text:
+    comparison = compare_answers(answer, str(row.get("answer") or ""))
+    grading_source = "pending-review"
+    if comparison is not None:
+        result = {
+            "verdict": "correct" if comparison else "incorrect",
+            "feedback": "答案与题库标准答案一致。请补充所用公式或关键依据。" if comparison else "当前数值与题库答案不一致，请检查计算和分母中的条件。",
+            "error_type": "" if comparison else "计算错误",
+        }
+        grading_source = "structured-comparison"
+    elif answer or reasoning or ocr_text:
         try:
-            parsed = await LLMClient(name="answer_diagnostic").chat_json(
+            parsed = await asyncio.wait_for(LLMClient(name="answer_diagnostic").chat_json(
                 [ChatMessage("user", diagnostic_prompt)],
                 system=(
                     "你是严谨的概率统计作答诊断教师。只按提供的标准答案评估，不得虚构。"
@@ -821,9 +856,10 @@ async def submit_question_attempt(
                     f"{MATH_MARKDOWN_RULE}"
                 ),
                 max_tokens=768,
-            )
+            ), timeout=25)
             if isinstance(parsed, dict):
                 result = parsed
+                grading_source = f"model:{LLMClient().model}"[:64]
         except Exception:
             pass
     allowed = {"correct", "partial", "incorrect", "needs_review"}
@@ -831,8 +867,8 @@ async def submit_question_attempt(
     feedback = str(result.get("feedback") or "").strip()
     error_type = str(result.get("error_type") or "").strip()
     if verdict not in allowed or not feedback:
-        normalize = lambda text: re.sub(r"[\s$\\{}，,。；;]", "", text.lower())
-        exact = bool(answer) and normalize(answer) == normalize(str(row.get("answer") or ""))
+        exact = comparison is True
+        grading_source = "structured-comparison" if exact else "pending-review"
         verdict = "correct" if exact else "needs_review"
         if exact:
             feedback = "答案与题库标准答案一致。请再用一句话说明所用公式或关键依据。"
@@ -842,7 +878,7 @@ async def submit_question_attempt(
             feedback = "手写图片已保存，但本次自动识别失败。请补充关键公式或结论后再次提交。"
         else:
             feedback = "作答已保存。当前无法可靠完成自动等价判断，建议补充关键公式或解题思路后再次提交。"
-        error_type = "" if exact else "表达不完整"
+        error_type = ""
     else:
         # Do not let free-form model labels pollute mastery analytics.  A
         # correct response has no error type; other responses use the audited
@@ -852,6 +888,18 @@ async def submit_question_attempt(
         elif error_type not in ALLOWED_ERROR_TYPES:
             error_type = "表达不完整"
         feedback = feedback[:2000]
+    if verdict == "needs_review":
+        error_type = ""
+        grading_source = "pending-review"
+    # Independence is global to the question, not reset by another assignment.
+    await db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    prior_count = int(await db.scalar(select(func.count(QuestionAttempt.id)).where(
+        QuestionAttempt.user_id == user_id, QuestionAttempt.question_id == question_id)) or 0)
+    support_count = await db.scalar(select(func.count(LearningSupportEvent.id)).where(
+        LearningSupportEvent.user_id == user_id, LearningSupportEvent.question_id == question_id))
+    all_hints = await db.scalar(select(func.count(HintEvent.id)).where(
+        HintEvent.user_id == user_id, HintEvent.question_id == question_id))
+    independent_eligible = prior_count == 0 and not support_count and not all_hints
     submitted_late = False
     if assignment and assignment.due_at:
         due_at = assignment.due_at
@@ -861,7 +909,12 @@ async def submit_question_attempt(
             else datetime.now() > due_at
         )
     attempt = QuestionAttempt(
-        user_id=user.id,
+        user_id=user_id,
+        request_key=payload.request_key,
+        request_hash=request_hash if payload.request_key else None,
+        independent_eligible=independent_eligible,
+        grading_source=grading_source,
+        grading_version=GRADING_VERSION,
         assignment_id=assignment_id,
         question_id=question_id,
         input_mode=input_mode,
@@ -880,51 +933,73 @@ async def submit_question_attempt(
         attempt_no=prior_count + 1,
     )
     db.add(attempt)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        if payload.request_key:
+            previous = await previous_response()
+            if previous is not None:
+                return previous
+        # Another request may have claimed the first unaided attempt while this
+        # answer was being diagnosed. Keep the work as a correction instead.
+        first = await db.scalar(select(QuestionAttempt.id).where(
+            QuestionAttempt.user_id == user_id, QuestionAttempt.question_id == question_id,
+            QuestionAttempt.independent_eligible.is_(True)).limit(1))
+        if not independent_eligible or first is None:
+            raise
+        attempt.independent_eligible = False
+        attempt.attempt_no = 1 + int(await db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.user_id == user_id, QuestionAttempt.question_id == question_id)) or 0)
+        db.add(attempt)
+        await db.commit()
     await db.refresh(attempt)
-    assignment_completed = False
-    if assignment_id and recipient:
-        item_count = await db.scalar(
-            select(func.count(AssignmentItem.id)).where(AssignmentItem.assignment_id == assignment_id)
-        )
-        attempted_count = await db.scalar(
-            select(func.count(func.distinct(QuestionAttempt.question_id))).where(
-                QuestionAttempt.assignment_id == assignment_id,
-                QuestionAttempt.user_id == user.id,
-            )
-        )
-        if int(attempted_count or 0) >= int(item_count or 0) > 0:
+    return await _saved_attempt_response(db, attempt)
+
+
+async def _saved_attempt_response(db: AsyncSession, attempt: QuestionAttempt) -> dict[str, Any]:
+    """Also repairs completion after a disconnect between the two commits."""
+    completed = False
+    if attempt.assignment_id:
+        recipient = await db.scalar(select(AssignmentRecipient).where(
+            AssignmentRecipient.assignment_id == attempt.assignment_id,
+            AssignmentRecipient.student_id == attempt.user_id))
+        total = await db.scalar(select(func.count(AssignmentItem.id)).where(AssignmentItem.assignment_id == attempt.assignment_id))
+        count = await db.scalar(select(func.count(func.distinct(QuestionAttempt.question_id))).where(
+            QuestionAttempt.assignment_id == attempt.assignment_id, QuestionAttempt.user_id == attempt.user_id))
+        completed = bool(total and count >= total)
+        if recipient and completed and recipient.status != "completed":
             recipient.status = "completed"
             recipient.completed_at = datetime.now(timezone.utc)
             await db.commit()
-            assignment_completed = True
     return {
-        "id": attempt.id,
-        "verdict": verdict,
-        "feedback": feedback,
-        "error_type": error_type or None,
-        "attempt_no": attempt.attempt_no,
-        "hint_count": hint_count,
-        "submitted_late": submitted_late,
-        "ocr_text": ocr_text or None,
-        "ocr_provider": "mineru" if image_data_url else None,
-        "ocr_status": ocr_status if image_data_url else None,
-        "assignment_id": assignment_id,
-        "assignment_completed": assignment_completed,
+        "id": attempt.id, "verdict": attempt.verdict, "feedback": attempt.feedback,
+        "error_type": attempt.error_type, "attempt_no": attempt.attempt_no,
+        "hint_count": attempt.hint_count, "submitted_late": attempt.submitted_late,
+        "ocr_text": attempt.ocr_text, "ocr_provider": attempt.ocr_provider, "ocr_status": attempt.ocr_status,
+        "assignment_id": attempt.assignment_id, "assignment_completed": completed,
+        "independent_eligible": attempt.independent_eligible,
+        "grading_source": attempt.grading_source, "grading_version": attempt.grading_version,
     }
 
 
 @router.get("/question-bank/attempts")
 async def list_question_attempts(
+    assignment_id: int | None = Query(default=None, gt=0),
+    question_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     attempts = (
         await db.execute(
             select(QuestionAttempt)
-            .where(QuestionAttempt.user_id == user.id)
+            .where(QuestionAttempt.user_id == user.id,
+                *([QuestionAttempt.assignment_id == assignment_id] if assignment_id else []),
+                *([QuestionAttempt.question_id == question_id] if question_id else []))
             .order_by(QuestionAttempt.id.desc())
-            .limit(100)
+            .offset(offset).limit(limit)
         )
     ).scalars().all()
     return [
@@ -932,6 +1007,11 @@ async def list_question_attempts(
             "id": item.id,
             "question_id": item.question_id,
             "assignment_id": item.assignment_id,
+            "answer": item.answer_text, "reasoning": item.reasoning,
+            "feedback": item.feedback, "image_data_url": item.image_data_url,
+            "input_mode": item.input_mode, "image_name": item.image_name, "ocr_status": item.ocr_status,
+            "ocr_text": item.ocr_text, "grading_source": item.grading_source,
+            "grading_version": item.grading_version, "independent_eligible": item.independent_eligible,
             "verdict": item.verdict,
             "error_type": item.error_type,
             "hint_count": item.hint_count,
@@ -957,6 +1037,8 @@ async def save_experiment_run(
         user_id=user.id,
         experiment_id=experiment_id,
         parameters_json=json.dumps(parameters, ensure_ascii=False),
+        seed=payload.seed,
+        algorithm_version=payload.algorithm_version,
         result_summary=result_summary,
         observation=observation or None,
     )
@@ -983,6 +1065,8 @@ async def list_experiment_runs(
             "id": item.id,
             "experiment_id": item.experiment_id,
             "parameters": json.loads(item.parameters_json),
+            "seed": item.seed,
+            "algorithm_version": item.algorithm_version,
             "result_summary": item.result_summary,
             "observation": item.observation,
             "created_at": item.created_at.isoformat() if item.created_at else None,
@@ -1060,6 +1144,9 @@ async def assistant(
     )
     if mode == "recommend":
         context_rows = _ordered_recommendations(context_rows)
+    elif not _is_teacher(user):
+        for context_row in context_rows:
+            db.add(LearningSupportEvent(user_id=user.id, question_id=context_row["ID"], kind="tutor"))
     session.updated_at = datetime.now(timezone.utc)
     if session.title == "新对话":
         session.title = message[:36]
@@ -1193,6 +1280,9 @@ async def assistant_stream(
     )
     if mode == "recommend":
         context_rows = _ordered_recommendations(context_rows)
+    elif not _is_teacher(user):
+        for context_row in context_rows:
+            db.add(LearningSupportEvent(user_id=user.id, question_id=context_row["ID"], kind="tutor"))
     session.updated_at = datetime.now(timezone.utc)
     if session.title == "新对话":
         session.title = message[:36]

@@ -20,7 +20,7 @@ def test_empty_profile_starts_with_foundation_path():
     assert profile["path"][0]["question_ids"]
 
 
-def test_repeated_errors_create_grounded_warning_and_path():
+def test_errors_on_distinct_questions_create_grounded_warning_and_path():
     row = _question_with("贝叶斯公式")
     attempts = [
         {
@@ -31,7 +31,7 @@ def test_repeated_errors_create_grounded_warning_and_path():
             "attempt_no": 2,
         },
         {
-            "question_id": row["ID"],
+            "question_id": next(q["ID"] for q in load_questions() if "贝叶斯公式" in q["keypoint"] and q["ID"] != row["ID"]),
             "verdict": "partial",
             "error_type": "条件遗漏",
             "hint_count": 1,

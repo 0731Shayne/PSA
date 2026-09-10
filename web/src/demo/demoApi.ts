@@ -1,8 +1,8 @@
-import { AxiosHeaders, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
+import { AxiosError, AxiosHeaders, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
 
 export const isDemoMode = import.meta.env.VITE_STATIC_PREVIEW === "true";
 export const DEMO_ROLE_KEY = "mra-demo-role";
-const DEMO_STATE_KEY = "mra-demo-state-v1";
+const DEMO_STATE_KEY = "mra-demo-state-v2";
 
 type DemoRole = "student" | "teacher";
 
@@ -152,13 +152,16 @@ const experimentCatalog = [
   { experiment_id: "poisson", keypoints: ["泊松近似", "二项分布"], question_ids: ["P000405"] },
 ];
 
-type DemoExperimentRun = { id: number; experiment_id: string; parameters: Record<string, number>; result_summary: string; observation: string; created_at: string };
+type DemoExperimentRun = { seed?:number; algorithm_version?:string; id: number; experiment_id: string; parameters: Record<string, number>; result_summary: string; observation: string; created_at: string };
 const demoExperimentRuns: DemoExperimentRun[] = [
   { id: 501, experiment_id: "bayes", parameters: { prior: 0.1, sensitivity: 0.9, specificity: 0.9 }, result_summary: "当前阳性后的后验概率 50.0%", observation: "先验率越低，同样的阳性结果越需要谨慎解释。", created_at: "2026-08-08T09:20:00Z" },
   { id: 502, experiment_id: "bayes", parameters: { prior: 0.02, sensitivity: 0.9, specificity: 0.9 }, result_summary: "当前阳性后的后验概率 15.5%", observation: "降低先验率后，假阳性在阳性人群中的占比明显上升。", created_at: "2026-08-09T03:10:00Z" },
 ];
 
+type DemoAttempt = {id:number;question_id:string;assignment_id?:number;request_key?:string;request_hash?:string;answer:string;reasoning:string;image_data_url?:string;verdict:string;feedback:string;hint_count:number;attempt_no:number;assignment_completed:boolean;submitted_late:boolean;independent_eligible:boolean;student_name:string};
 interface DemoState {
+  attempts?: DemoAttempt[];
+  exposed?: string[];
   classrooms: typeof classrooms;
   plans: typeof demoPlan[];
   experimentRuns: typeof demoExperimentRuns;
@@ -225,16 +228,20 @@ export const demoAdapter: AxiosAdapter = async config => {
   const state = loadState();
 
   if (url === "/api/question-bank/stats") return response(config, stats);
-  if (url === "/api/question-bank/learning-summary") return response(config, learningSummary);
+  if (url === "/api/question-bank/learning-summary") return response(config, {...learningSummary, graded_questions:12,pending_review:(state.attempts || []).filter(a=>a.verdict==="needs_review").length});
+  if(url === "/api/question-bank/attempts") {
+    const params=config.params || {};
+    return response(config,(state.attempts || []).filter(a=>(!params.assignment_id || a.assignment_id===Number(params.assignment_id)) && (!params.question_id || a.question_id===params.question_id)).slice(Number(params.offset) || 0,(Number(params.offset) || 0)+(Number(params.limit) || 100)));
+  }
   if (url === "/api/question-bank/learning-profile") {
     const completed = new Set((state.experimentRuns || []).map(item => item.experiment_id));
-    return response(config, { ...learningProfile, path: learningProfile.path.map(item => ({ ...item, experiment_completed: item.experiment_id ? completed.has(item.experiment_id) : false })) });
+    return response(config, { ...learningProfile, evidence:{...learningProfile.evidence,pending_review:(state.attempts || []).filter(a=>a.verdict==="needs_review").length}, mastery:learningProfile.mastery.map(m=>({...m,confidence:Math.min(90,Math.round(100*m.questions/(m.questions+3)))})), path: learningProfile.path.map(item => ({ ...item, experiment_completed: item.experiment_id ? completed.has(item.experiment_id) : false })) });
   }
   if (url === "/api/question-bank/experiments/catalog") return response(config, experimentCatalog);
   if (url === "/api/question-bank/experiments/runs" && method === "get") return response(config, state.experimentRuns || []);
   if (url === "/api/question-bank/experiments/runs" && method === "post") {
     const values = body(config);
-    const created = { id: Date.now(), experiment_id: String(values.experiment_id || "coin"), parameters: (values.parameters || {}) as Record<string, number>, result_summary: String(values.result_summary || ""), observation: String(values.observation || ""), created_at: new Date().toISOString() };
+    const created = { seed:Number(values.seed) || undefined, algorithm_version: values.algorithm_version ? String(values.algorithm_version) : undefined, id: Date.now(), experiment_id: String(values.experiment_id || "coin"), parameters: (values.parameters || {}) as Record<string, number>, result_summary: String(values.result_summary || ""), observation: String(values.observation || ""), created_at: new Date().toISOString() };
     state.experimentRuns = state.experimentRuns || [];
     state.experimentRuns.unshift(created);
     saveState(state);
@@ -249,16 +256,29 @@ export const demoAdapter: AxiosAdapter = async config => {
   if (url === "/api/question-bank/questions" && method === "get") return response(config, questionList(config));
 
   const answerMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/answer$/i);
-  if (answerMatch) return response(config, questions.find(item => item.ID === answerMatch[1].toUpperCase()) || questions[0]);
+  if (answerMatch) {
+    const qid=answerMatch[1].toUpperCase();
+    state.exposed=[...new Set([...(state.exposed || []),qid])];saveState(state);
+    return response(config, questions.find(item => item.ID === qid) || questions[0]);
+  }
   const hintMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/hint$/i);
-  if (hintMatch) return response(config, { hint: "先写清楚已知事件和目标事件，再判断分母是否需要把所有可能来源相加。" });
+  if (hintMatch) {state.exposed=[...new Set([...(state.exposed || []),hintMatch[1].toUpperCase()])];saveState(state);return response(config, { hint: "先写清楚已知事件和目标事件，再判断分母是否需要把所有可能来源相加。" });}
   const attemptMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/attempts$/i);
   if (attemptMatch) {
     const selected = questions.find(item => item.ID === attemptMatch[1].toUpperCase()) || questions[0];
     const values = body(config);
-    const normalize = (value: unknown) => String(value || "").toLowerCase().replace(/[\s$\\{}，,。；;]/g, "");
-    const exact = normalize(values.answer) === normalize(selected.answer);
-    return response(config, { verdict: exact ? "correct" : "needs_review", feedback: exact ? "答案与演示题库标准答案一致，请再说明关键公式或依据。" : "作答已保留。请检查条件方向、分母来源和关键公式是否完整。", error_type: exact ? undefined : "表达不完整", hint_count: 0, attempt_no: 2, assignment_completed: false, submitted_late: false }, 201);
+    const canonical=(value:unknown)=>String(value || "").trim().replace(/^\$\$([\s\S]*)\$\$$/,"$1").replace(/^\$([\s\S]*)\$$/,"$1").trim().replace(/\s+/g," ");
+    const exact=Boolean(values.answer) && canonical(values.answer)===canonical(selected.answer);
+    const fingerprint=JSON.stringify({question:selected.ID,answer:values.answer,reasoning:values.reasoning,image:values.image_data_url,assignment:values.assignment_id});
+    const saved=values.request_key?(state.attempts || []).find(a=>a.request_key===values.request_key):undefined;
+    if(saved){if(saved.request_hash!==fingerprint)throw new AxiosError("提交编号冲突","409",config,undefined,response(config,{detail:"此提交编号已用于另一份作答"},409));return response(config,saved);}
+    const prior=(state.attempts || []).filter(a=>a.question_id===selected.ID);
+    const assignmentId=Number(values.assignment_id) || undefined;
+    const task=studentTasks.find(t=>t.id===assignmentId);
+    const done=new Set([...(task?.question_ids.slice(0,task.attempted_questions) || []),...(state.attempts || []).filter(a=>a.assignment_id===assignmentId).map(a=>a.question_id),selected.ID]);
+    const created:DemoAttempt={id:Date.now(),question_id:selected.ID,assignment_id:assignmentId,request_key:values.request_key?String(values.request_key):undefined,request_hash:fingerprint,answer:String(values.answer || ""),reasoning:String(values.reasoning || ""),image_data_url:String(values.image_data_url || ""),verdict:exact?"correct":"needs_review",feedback:exact?"答案与演示题库一致，请说明关键依据。":"作答已保存，演示环境无法可靠判断，待复核不影响掌握度。",hint_count:0,attempt_no:prior.length+1,assignment_completed:Boolean(task && task.question_ids.every(id=>done.has(id))),submitted_late:Boolean(task?.due_at && new Date(task.due_at).getTime()<Date.now()),independent_eligible:!prior.length && !state.exposed?.includes(selected.ID),student_name:"演示学生"};
+    state.attempts=[created,...(state.attempts || [])];saveState(state);
+    return response(config,created,201);
   }
   const questionMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})$/i);
   if (questionMatch) {
@@ -278,13 +298,16 @@ export const demoAdapter: AxiosAdapter = async config => {
     return response(config, created, 201);
   }
   if (url === "/api/classrooms/join" && method === "post") return response(config, { name: "2026级统计学1班" });
-  if (url === "/api/assignments/mine") return response(config, studentTasks);
+  const taskProgress=(task:typeof studentTasks[number])=>{const done=[...new Set([...task.question_ids.slice(0,task.attempted_questions),...(state.attempts || []).filter(a=>a.assignment_id===task.id).map(a=>a.question_id)])];return {...task,attempted_questions:done.length,attempted_question_ids:done,my_status:done.length>=task.question_ids.length?"completed":"assigned"};};
+  if (url === "/api/assignments/mine") return response(config, studentTasks.map(taskProgress));
   const assignmentDetailMatch = url.match(/^\/api\/assignments\/(\d+)$/);
   if (assignmentDetailMatch && method === "get") {
     const task = studentTasks.find(item => item.id === Number(assignmentDetailMatch[1]));
-    if (task) return response(config, { ...task, hint_policy: task.kind === "retest" ? "blocked" : task.kind === "intervention" ? "reduced" : "allowed", transfer_question_id: task.kind === "diagnostic" ? undefined : task.question_ids[task.question_ids.length - 1], attempted_question_ids: task.question_ids.slice(0, task.attempted_questions), questions: task.question_ids.map(id => questions.find(item => item.ID === id)).filter(Boolean) });
+    if (task) return response(config, { ...taskProgress(task), hint_policy: task.kind === "retest" ? "blocked" : task.kind === "intervention" ? "reduced" : "allowed", transfer_question_id: task.kind === "diagnostic" ? undefined : task.question_ids[task.question_ids.length - 1], attempted_question_ids: taskProgress(task).attempted_question_ids, questions: task.question_ids.map(id => questions.find(item => item.ID === id)).filter(Boolean) });
   }
-  if (/^\/api\/classrooms\/\d+\/radar$/.test(url)) return response(config, { ...radar, classroom: state.classrooms.find(item => item.id === Number(url.split("/")[3])) || radar.classroom });
+  if (/^\/api\/classrooms\/\d+\/reviews$/.test(url)) return response(config,(state.attempts || []).filter(a=>a.assignment_id && a.verdict==="needs_review").map(a=>({...a,question:questions.find(q=>q.ID===a.question_id)})));
+  if (/^\/api\/classrooms\/\d+\/reviews\/\d+$/.test(url) && method==="patch") {const a=state.attempts?.find(a=>a.id===Number(url.split("/").slice(-1)[0]));if(a){a.verdict=String(body(config).verdict);a.feedback=String(body(config).feedback);saveState(state);}return response(config,{ok:true});}
+  if (/^\/api\/classrooms\/\d+\/radar$/.test(url)) return response(config, { ...radar, summary:{...radar.summary,pending_review:(state.attempts || []).filter(a=>a.assignment_id && a.verdict==="needs_review").length}, classroom: state.classrooms.find(item => item.id === Number(url.split("/")[3])) || radar.classroom });
   if (/^\/api\/classrooms\/\d+\/interventions\/preview$/.test(url)) {
     const values = body(config);
     const tasks = radar.groups.map((group, index) => { const ids = index === 0 ? ["P000001", "P000082"] : index === 1 ? ["P000082", "P000206"] : ["P000206", "P000737"]; const kind = group.type === "transfer_ready" ? "retest" : "intervention"; return { group_key: group.key, group_label: group.label, focus: group.focus, strategy: group.strategy, student_ids: group.student_ids, question_ids: ids, kind, title: `${group.label} · ${group.focus}`, description: `${group.strategy}最后一道题作为无提示迁移验证。`, hint_policy: kind === "retest" ? "blocked" : "reduced", transfer_question_id: ids[ids.length - 1], due_at: null }; });

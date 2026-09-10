@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {calculate,zFor,ALGORITHM_VERSION} from '../src/experiments/model.ts';
+
+for(const [level,z] of [[80,1.2815515655],[89,1.5981931399],[94,1.8807936082],[95,1.9599639845],[98,2.3263478740],[99,2.5758293035]]) assert.ok(Math.abs(zFor(level)-z)<0.00001,`wrong quantile at ${level}%`);
+const low=calculate('confidence',{n:30,confidence:95,repeats:500},1);
+const high=calculate('confidence',{n:30,confidence:98,repeats:500},1);
+assert.notEqual(low.summary,high.summary);
+assert.equal(high.reference,.98);
+const normal1=calculate('normal',{mu:0,sigma:1},1), normal3=calculate('normal',{mu:0,sigma:3},1);
+assert.deepEqual(normal1.domain,normal3.domain);
+assert.ok(Math.max(...normal1.points.map(p=>p.y))>Math.max(...normal3.points.map(p=>p.y))*2.99);
+assert.notDeepEqual(normal1.points,normal3.points);
+assert.deepEqual(calculate('coin',{trials:1000,p:.5},123),calculate('coin',{trials:1000,p:.5},123));
+assert.notDeepEqual(calculate('coin',{trials:1000,p:.5},123).points,calculate('coin',{trials:1000,p:.5},124).points);
+const bayes=calculate('bayes',{prior:.1,sensitivity:.9,specificity:.9},1);
+assert.ok(Math.abs(bayes.marker.y-.5)<1e-12);
+const poisson=calculate('poisson',{n:100,p:.02},1);
+assert.equal(poisson.comparison.length,poisson.points.length);
+assert.ok(Math.abs(poisson.comparison[0].y-.98**100)<1e-12);
+assert.equal(ALGORITHM_VERSION,'probability-v2');
+console.log('experiment regression checks passed');

@@ -82,6 +82,7 @@ jobs:
       - run: npm ci
       - run: npm run test:math
       - run: npm run test:ui
+      - run: npm run test:experiments
       - run: npm run build
 
   browser-e2e:

@@ -6,9 +6,13 @@ test.beforeEach(async ({ page }) => {
   await expect(page).toHaveURL(/\/dashboard$/);
 });
 
-test("recommendation starter switches mode and returns the requested count", async ({ page }) => {
+test("recommendation starter switches mode and returns the requested count", async ({ page }, testInfo) => {
   await page.goto("/tutor");
-  await page.getByRole("button", { name: "推荐 3 道样本空间的基础题" }).click();
+  // Both viewport projects use the same local account; begin a fresh conversation.
+  const newChat = page.getByRole("button", { name: "新建对话" });
+  if (testInfo.project.name.startsWith("mobile")) await page.getByRole("button", { name: "设置" }).click();
+  await newChat.click();
+  await page.getByRole("log", { name: "答疑消息" }).getByRole("button", { name: "推荐 3 道样本空间的基础题", exact: true }).click();
   await expect(page.getByRole("heading", { name: "题目推荐" })).toBeVisible();
   await expect(page.getByText("我筛选了 3 道题，并按难度由易到难排列。建议独立作答后再查看解析。"))
     .toBeVisible();

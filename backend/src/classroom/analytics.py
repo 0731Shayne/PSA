@@ -47,6 +47,7 @@ def _student_group(profile: dict[str, Any], student_attempts: list[dict[str, Any
     if focus_item and focus_item["status"] == "at_risk" and weak_prerequisites:
         return "prerequisite_gap", weak_prerequisites[0]
 
+    student_attempts = [item for item in student_attempts if item.get("verdict") in {"correct", "partial", "incorrect"}]
     hints = sum(int(item.get("hint_count") or 0) for item in student_attempts)
     if hints >= 2 and hints / max(len(student_attempts), 1) >= 0.5:
         return "hint_dependent", focus
@@ -75,13 +76,14 @@ def build_classroom_radar(
         profile = build_learning_profile(rows, evidence)
         group_key, focus = _student_group(profile, evidence)
         grouped[(group_key, focus)].append(student_id)
-        errors = Counter(str(item.get("error_type")) for item in evidence if item.get("error_type"))
+        errors = Counter(str(item.get("error_type")) for item in evidence if item.get("error_type") and item.get("verdict") != "needs_review")
         for mastery in profile["mastery"]:
             concept_evidence[mastery["name"]].append(mastery)
         if any(
             item.get("assignment_kind") in {"intervention", "retest"}
             and item.get("is_transfer") is True
             and item.get("verdict") == "correct"
+            and item.get("independent_eligible") is True
             and int(item.get("hint_count") or 0) == 0
             for item in evidence
         ):
@@ -92,6 +94,7 @@ def build_classroom_radar(
                 "name": student["name"],
                 "overall_mastery": profile["summary"]["overall_mastery"],
                 "evidence_level": profile["summary"]["evidence_level"],
+                "pending_review": profile["evidence"]["pending_review"],
                 "attempts": profile["evidence"]["attempts"],
                 "questions": profile["evidence"]["questions"],
                 "risk_keypoints": profile["summary"]["risk_keypoints"],
@@ -143,6 +146,7 @@ def build_classroom_radar(
     )
     return {
         "summary": {
+            "pending_review": sum(item["pending_review"] for item in student_rows),
             "members": len(students),
             "active_students": active_students,
             "attempts": len(attempts),

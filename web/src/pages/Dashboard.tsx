@@ -1,103 +1,70 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Skeleton } from "antd";
-import { ArrowRightOutlined, BookOutlined, BulbOutlined, CheckSquareOutlined, ClockCircleOutlined, ExperimentOutlined, MessageOutlined, NodeIndexOutlined, RadarChartOutlined, ReadOutlined } from "@ant-design/icons";
+import { Alert, Button, Empty, Progress, Select, Skeleton, Tag } from "antd";
+import { ArrowRightOutlined, BookOutlined, ExperimentOutlined, ReadOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-interface Stats { total: number; qtypes: Record<string, number>; difficulties: Record<string, number>; keypoints: Record<string, number> }
-interface LearningSummary { sessions: number; questions_seen: number; assistant_answers: number; attempts: number; attempted_questions: number; correct_questions: number; focus_keypoints: { name: string; count: number }[]; recent_sessions: { id: number; title: string; updated_at: string }[] }
+type Classroom={id:number;name:string;status:string};
+type Task={id:number;title:string;classroom_name?:string;my_status?:string;status?:string;question_ids:string[];attempted_questions?:number;completed_count?:number;recipient_count?:number;due_at?:string};
+type Radar={summary:{members:number;needs_intervention:number;independent_transfer:number;pending_review?:number};assignments:Task[]};
+type Summary={attempted_questions:number;graded_questions?:number;correct_questions:number;pending_review?:number;recent_sessions:{id:number;title:string}[]};
+type Profile={summary:{next_focus:string};evidence:{questions:number;pending_review?:number};path:{title:string;reason:string;question_ids:string[]}[]};
 
 export default function Dashboard() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [learning, setLearning] = useState<LearningSummary | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-  const teacher = user?.role === "teacher";
-
-  useEffect(() => {
-    let active = true;
-    setLoadError(false);
-    const requests: Promise<unknown>[] = [apiClient.get<Stats>("/api/question-bank/stats").then(response => { if (active) setStats(response.data); })];
-    if (!teacher) requests.push(apiClient.get<LearningSummary>("/api/question-bank/learning-summary").then(response => { if (active) setLearning(response.data); }));
-    Promise.all(requests).catch(() => { if (active) setLoadError(true); });
-    return () => { active = false; };
-  }, [teacher, reloadKey]);
-
-  const keypoints = Object.entries(stats?.keypoints || {}).slice(0, 8);
-  const accuracy = learning?.attempted_questions ? Math.round((learning.correct_questions / learning.attempted_questions) * 100) : 0;
-  const loading = !loadError && (!stats || (!teacher && !learning));
-
-  return (
-    <div className="dashboard-page">
-      {loadError && <Alert className="mb-5" type="error" showIcon message="暂时无法载入学习数据" description="请检查网络连接后重试；导航仍可使用，数据将在连接恢复后更新。" action={<Button size="small" onClick={() => setReloadKey(value => value + 1)}>重新加载</Button>} />}
-
-      <section className="dashboard-hero">
-        <div className="dashboard-hero-copy">
-          <p className="dashboard-eyebrow"><span>第 01 章</span> 你好，{user?.name}</p>
-          <h1>{teacher ? "把知识点组织成一堂好课" : "从一道题开始，真正理解概率统计"}</h1>
-          <p className="dashboard-intro">{teacher ? "从专属题库生成分层学习单、课堂检测与认知断层预警。" : "系统会根据作答、错误类型和提示使用情况，持续更新你的学习路径。"}</p>
-          <div className="dashboard-actions">
-            <button onClick={() => navigate(teacher ? "/classrooms" : "/tasks")} className="dashboard-primary-action">{teacher ? "查看班级认知雷达" : "查看我的任务"} <ArrowRightOutlined /></button>
-            <button onClick={() => navigate("/questions")} className="dashboard-secondary-action">浏览课程题库</button>
-          </div>
-        </div>
-        <div className="dashboard-figure" aria-label="贝叶斯公式与概率曲线示意">
-          <div className="dashboard-figure-caption"><span>FIG. 01</span><span>条件概率</span></div>
-          <ProbabilitySketch />
-          <div className="dashboard-formula"><strong>P(A|B)</strong><span>= P(B|A)P(A) / P(B)</span></div>
-          <p>新的观测证据，会改变我们对事件概率的判断。</p>
-          <button onClick={() => navigate("/questions?keypoint=贝叶斯公式")}>查看相关题目 <ArrowRightOutlined /></button>
-        </div>
-      </section>
-
-      <section aria-label="学习概览" className="dashboard-ledger">
-        {loading ? <div className="col-span-3 grid gap-5 p-6 md:grid-cols-3"><Skeleton active paragraph={{ rows: 2 }} /><Skeleton active paragraph={{ rows: 2 }} /><Skeleton active paragraph={{ rows: 2 }} /></div> : teacher ? <><Stat icon={<BookOutlined />} label="题库总量" value={stats?.total ?? "—"} note="覆盖概率论与数理统计" /><Stat icon={<BulbOutlined />} label="知识点" value={stats ? Object.keys(stats.keypoints).length : "—"} note="支持按考点精准检索" /><Stat icon={<ReadOutlined />} label="题型" value={stats ? Object.keys(stats.qtypes).length : "—"} note={stats ? Object.keys(stats.qtypes).slice(0, 3).join(" · ") : "等待数据恢复"} /></> : <><Stat icon={<MessageOutlined />} label="学习会话" value={learning?.sessions ?? "—"} note="累计保留的答疑会话" /><Stat icon={<BookOutlined />} label="已作答题目" value={learning?.attempted_questions ?? "—"} note={`其中 ${learning?.correct_questions ?? 0} 题已正确完成`} /><Stat icon={<BulbOutlined />} label="当前正确率" value={learning ? `${accuracy}%` : "—"} note={learning?.attempted_questions ? `基于 ${learning.attempted_questions} 道已作答题目` : "完成作答后开始统计"} /></>}
-      </section>
-
-      <section className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_.75fr]">
-        <div className="editorial-panel">
-          <div className="mb-4 flex items-center justify-between gap-4"><div><h2 className="text-lg font-extrabold text-slate-900">{teacher ? "热门知识点" : "我的学习焦点"}</h2><p className="mt-1 text-sm text-slate-500">{teacher ? "选择知识点查看相关题目" : "根据近期答疑引用自动归纳"}</p></div><Button type="link" onClick={() => navigate("/questions")}>全部题目</Button></div>
-          {!teacher && learning?.focus_keypoints.length === 0 ? <div className="flex min-h-52 flex-col items-center justify-center border-t border-slate-100 text-center"><BulbOutlined className="text-2xl text-slate-400" /><p className="mt-3 text-sm font-bold text-slate-700">完成第一次答疑后生成学习焦点</p><Button className="mt-2" type="link" onClick={() => navigate("/tutor")}>现在开始</Button></div> : <div className="divide-y divide-slate-100 border-t border-slate-100">
-            {(teacher ? keypoints.map(([name, count]) => ({ name, count })) : learning?.focus_keypoints || []).map((item, index) => <button key={item.name} onClick={() => navigate(`/questions?keypoint=${encodeURIComponent(item.name)}`)} className="focus-row group"><span className="focus-index">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700 group-hover:text-teal-900">{item.name}</span><span className="text-sm text-slate-500">{item.count} 次</span></button>)}
-          </div>}
-        </div>
-
-        <div className="editorial-panel">
-          <h2 className="text-lg font-extrabold text-slate-900">快速开始</h2>
-          <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
-            <Quick icon={<MessageOutlined />} title="按题号问解析" desc="例如：请讲解 P000001" onClick={() => navigate("/tutor?prompt=请讲解 P000001")} />
-            <Quick icon={<BulbOutlined />} title="推荐练习题" desc="按知识点和难度智能推荐" onClick={() => navigate("/tutor?mode=recommend")} />
-            <Quick icon={<ExperimentOutlined />} title="参数化实验" desc="调节参数并运行概率统计模拟" onClick={() => navigate("/experiments")} />
-            {!teacher && <Quick icon={<CheckSquareOutlined />} title="完成班级任务" desc="诊断、分组干预与迁移验证" onClick={() => navigate("/tasks")} />}
-            {!teacher && <Quick icon={<NodeIndexOutlined />} title="查看学习路径" desc="掌握度、断层预警与下一步任务" onClick={() => navigate("/learning-path")} />}
-            {teacher && <Quick icon={<RadarChartOutlined />} title="查看班级证据" desc="认知风险、干预分组与迁移验证" onClick={() => navigate("/classrooms")} />}
-            {teacher && <Quick icon={<ReadOutlined />} title="设计一节课" desc="从题库选例题生成课堂方案" onClick={() => navigate("/teaching")} />}
-            {!teacher && learning?.recent_sessions.slice(0, 1).map(item => <Quick key={item.id} icon={<ClockCircleOutlined />} title="继续最近学习" desc={item.title} onClick={() => navigate("/tutor")} />)}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
+  const {user}=useAuth();
+  const teacher=user?.role==="teacher";
+  const navigate=useNavigate();
+  const [classrooms,setClassrooms]=useState<Classroom[]>([]);
+  const [selected,setSelected]=useState<number>();
+  const [radar,setRadar]=useState<Radar|null>(null);
+  const [tasks,setTasks]=useState<Task[]>([]);
+  const [summary,setSummary]=useState<Summary|null>(null);
+  const [profile,setProfile]=useState<Profile|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(false);
+  const [revision,setRevision]=useState(0);
+  useEffect(()=>{
+    let active=true;setLoading(true);setError(false);
+    const load=async()=>{
+      if(teacher){
+        const response=await apiClient.get<Classroom[]>("/api/classrooms");
+        if(!active)return;
+        setClassrooms(response.data);setSelected(current=>response.data.some(c=>c.id===current)?current:response.data.find(c=>c.status==="active")?.id ?? response.data[0]?.id);
+      } else {
+        const [t,s,p]=await Promise.all([apiClient.get<Task[]>("/api/assignments/mine"),apiClient.get<Summary>("/api/question-bank/learning-summary"),apiClient.get<Profile>("/api/question-bank/learning-profile")]);
+        if(active){setTasks(t.data);setSummary(s.data);setProfile(p.data);}
+      }
+    };
+    load().catch(()=>{if(active)setError(true);}).finally(()=>{if(active)setLoading(false);});
+    return ()=>{active=false;};
+  },[teacher,revision]);
+  useEffect(()=>{
+    if(!teacher || !selected){setRadar(null);return;}
+    let active=true;setRadar(null);
+    apiClient.get<Radar>(`/api/classrooms/${selected}/radar`).then(r=>{if(active)setRadar(r.data);}).catch(()=>{if(active)setError(true);});
+    return ()=>{active=false;};
+  },[teacher,selected,revision]);
+  const pending=tasks.filter(t=>t.my_status!=="completed").sort((a,b)=>(b.attempted_questions || 0)-(a.attempted_questions || 0) || (a.due_at?new Date(a.due_at).getTime():Infinity)-(b.due_at?new Date(b.due_at).getTime():Infinity));
+  const next=pending[0];
+  const classURL=`/classrooms${selected?`?classroom=${selected}`:""}`;
+  const activeTasks=radar?.assignments.filter(t=>t.status==="published") || [];
+  return <div className="dashboard-page action-dashboard">
+    <header className="dashboard-heading"><div><p className="text-sm text-slate-600">你好，{user?.name} · {teacher?"教师工作台":"学习工作台"}</p><h1 className="mt-2 text-2xl font-bold">{teacher?"从今天的班级待办开始":"接着上一次，继续前进"}</h1></div>{teacher && classrooms.length>0 && <Select aria-label="当前班级" className="w-full sm:!w-64" value={selected} onChange={id=>{setError(false);setSelected(id);}} options={classrooms.map(c=>({value:c.id,label:c.name}))}/>}</header>
+    {error && <Alert className="my-4" type="error" showIcon message="暂时无法载入工作台数据" description="已提交的记录仍保留，请重新加载。" action={<Button onClick={()=>setRevision(v=>v+1)}>重新加载</Button>}/>}
+    {loading?<Skeleton active paragraph={{rows:8}}/>:teacher?<>
+      {!classrooms.length?<section className="dashboard-next"><h2 className="text-xl font-bold">建立第一个课程班级</h2><p className="my-3">创建班级并邀请学生，发布一组短诊断后就能查看学习证据。</p><Button type="primary" onClick={()=>navigate("/classrooms")}>创建班级 <ArrowRightOutlined/></Button></section>:!radar?(!error && <Skeleton active/>):<>
+        <section className="dashboard-next"><div><Tag>当前待办</Tag><h2 className="mt-3 text-xl font-bold">{radar.summary.pending_review?`${radar.summary.pending_review} 份作答等待复核`:radar.summary.needs_intervention?`${radar.summary.needs_intervention} 名学生需要后续练习`:activeTasks.length?"跟进进行中的班级任务":"为本班安排下一次诊断"}</h2><p className="mt-2 text-sm leading-6 text-slate-600">先确认可用证据，再安排教学行动。待复核作答不计入学生的掌握度和风险。</p></div><Button type="primary" size="large" onClick={()=>navigate(`${classURL}&tab=${radar.summary.pending_review?"review":"overview"}`)}>{radar.summary.pending_review?"查看待复核作答":"查看班级证据"}<ArrowRightOutlined/></Button></section>
+        <div className="dashboard-metrics"><Metric label="当前班级" value={radar.summary.members} note="学生"/><Metric label="进行中任务" value={activeTasks.length} note="最近任务中仍开放"/><Metric label="独立迁移" value={radar.summary.independent_transfer} note="首次、未受辅助的新题作答"/></div>
+        <section className="editorial-panel"><div className="flex justify-between gap-3"><h2 className="text-lg font-bold">进行中的任务</h2><Button type="link" onClick={()=>navigate(`${classURL}&tab=tasks`)}>管理任务</Button></div>{!activeTasks.length?<Empty description="暂无进行中任务"/>:activeTasks.slice(0,4).map(t=><div className="dashboard-task" key={t.id}><div><h3 className="font-semibold">{t.title}</h3><p className="mt-1 text-sm text-slate-600">{t.question_ids.length} 道题 · {dueLabel(t.due_at)}</p></div><div className="min-w-36"><p className="text-sm">{t.completed_count}/{t.recipient_count} 人完成</p><Progress percent={t.recipient_count?Math.round((t.completed_count || 0)/t.recipient_count*100):0} showInfo={false}/></div></div>)}</section>
+      </>}
+    </>:<>
+      <section className="dashboard-next"><div><Tag>{next?"待完成任务":"下一步练习"}</Tag><h2 className="mt-3 text-xl font-bold">{next?.title || `从${profile?.summary.next_focus || "样本空间"}开始`}</h2><p className="mt-2 text-sm text-slate-600">{next?`${next.classroom_name} · ${dueLabel(next.due_at)}`:profile?.evidence.questions?"根据已获得可靠判断的作答推荐，先完成一题，再看反馈。":"先完成基础题，建立你的第一份学习证据。"}</p>{next && <div className="mt-3 max-w-sm"><Progress percent={Math.round((next.attempted_questions || 0)/Math.max(next.question_ids.length,1)*100)} showInfo={false}/><p className="text-sm">已完成 {next.attempted_questions || 0}/{next.question_ids.length} 题</p></div>}</div><Button type="primary" size="large" onClick={()=>navigate(next?`/tasks/${next.id}`:"/learning-path")}>{next?"继续完成任务":"开始当前练习"}<ArrowRightOutlined/></Button></section>
+      <div className="dashboard-metrics"><Metric label="待完成" value={pending.length} note="班级任务"/><Metric label="已正确完成" value={summary?.correct_questions ?? 0} note={`基于 ${summary?.graded_questions ?? 0} 道已判定题目`}/><Metric label="待复核" value={summary?.pending_review ?? 0} note="暂不影响掌握度"/></div>
+      <div className="grid gap-5 lg:grid-cols-2"><section className="editorial-panel"><h2 className="text-lg font-bold">接下来的学习重点</h2><p className="mt-3 text-xl font-semibold text-teal-900">{profile?.summary.next_focus || "样本空间"}</p><p className="my-3 text-sm leading-6 text-slate-600">已积累 {profile?.evidence.questions || 0} 道可评估题目的证据。查看推荐原因、相关题目与实验。</p><Button onClick={()=>navigate("/learning-path")}>查看学习路径</Button></section><section className="editorial-panel"><h2 className="text-lg font-bold">最近的答疑</h2>{summary?.recent_sessions.length?summary.recent_sessions.slice(0,3).map(s=><button className="quick-row" key={s.id} onClick={()=>navigate(`/tutor?session=${s.id}`)}><span className="flex-1 text-left">{s.title}</span><ArrowRightOutlined/></button>):<p className="my-3 text-sm text-slate-600">遇到问题时，可先描述自己的思路。</p>}<Button type="link" onClick={()=>navigate("/tutor")}>进入智能答疑</Button></section></div>
+    </>}
+    <section className="dashboard-tools" aria-label="课程工具"><Button icon={<BookOutlined/>} onClick={()=>navigate("/questions")}>课程题库</Button><Button icon={<ExperimentOutlined/>} onClick={()=>navigate("/experiments")}>概率实验室</Button>{teacher?<Button icon={<ReadOutlined/>} onClick={()=>navigate("/teaching")}>设计一节课</Button>:<Button onClick={()=>navigate("/tasks")}>全部任务 / 加入班级</Button>}</section>
+  </div>;
 }
-
-function Stat({ icon, label, value, note }: { icon: React.ReactNode; label: string; value: number | string; note: string }) {
-  return <div className="dashboard-stat"><div><p className="dashboard-stat-label">{label}</p><p className="dashboard-stat-value">{value}</p><p className="dashboard-stat-note">{note}</p></div><span className="dashboard-stat-icon">{icon}</span></div>;
-}
-
-function Quick({ icon, title, desc, onClick }: { icon: React.ReactNode; title: string; desc: string; onClick: () => void }) {
-  return <button onClick={onClick} className="quick-row group"><span className="quick-icon">{icon}</span><span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-800 group-hover:text-teal-950">{title}</span><span className="mt-0.5 block truncate text-sm text-slate-500 group-hover:text-teal-800">{desc}</span></span><ArrowRightOutlined className="quick-arrow" /></button>;
-}
-
-function ProbabilitySketch() {
-  return <svg className="probability-sketch" viewBox="0 0 360 145" role="img" aria-label="概率密度曲线">
-    <path className="sketch-grid" d="M24 22v98h316M24 95h316M24 70h316M24 45h316M87 22v98M150 22v98M213 22v98M276 22v98" />
-    <path className="sketch-area" d="M25 118C58 117 91 111 117 92c28-21 33-61 69-65 40-5 45 56 78 72 22 11 50 17 75 19v2H25z" />
-    <path className="sketch-curve" d="M25 118C58 117 91 111 117 92c28-21 33-61 69-65 40-5 45 56 78 72 22 11 50 17 75 19" />
-    <path className="sketch-marker" d="M186 27v93" />
-    <circle cx="186" cy="27" r="4" />
-    <text x="194" y="21">μ</text><text x="322" y="137">x</text><text x="10" y="22">f(x)</text>
-  </svg>;
-}
+function Metric({label,value,note}:{label:string;value:number;note:string}) {return <div><p className="text-sm text-slate-600">{label}</p><p className="my-2 text-3xl font-bold tabular-nums">{value}</p><p className="text-sm text-slate-600">{note}</p></div>;}
+function dueLabel(value?:string) {return value?`截止 ${new Date(value).toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}${new Date(value).getTime()<Date.now()?" · 可补交":""}`:"未设置截止时间";}

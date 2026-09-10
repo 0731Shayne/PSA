@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from ..auth.handler import get_current_user
 from ..db.models import (
@@ -242,7 +243,7 @@ async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
     if assignment_ids:
         attempts = (
             await db.execute(
-                select(QuestionAttempt)
+                select(QuestionAttempt).options(load_only(QuestionAttempt.question_id, QuestionAttempt.user_id, QuestionAttempt.assignment_id, QuestionAttempt.verdict, QuestionAttempt.error_type, QuestionAttempt.hint_count, QuestionAttempt.attempt_no, QuestionAttempt.independent_eligible, QuestionAttempt.created_at))
                 .where(QuestionAttempt.assignment_id.in_(assignment_ids))
                 .order_by(QuestionAttempt.id.desc())
             )
@@ -258,6 +259,7 @@ async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
                 "error_type": item.error_type,
                 "hint_count": item.hint_count,
                 "attempt_no": item.attempt_no,
+                "independent_eligible": item.independent_eligible,
                 "assignment_kind": assignment_kind.get(item.assignment_id),
                 "is_transfer": assignment_transfer.get(item.assignment_id) == item.question_id,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
@@ -817,3 +819,48 @@ async def classroom_detail(
         "join_code": classroom.join_code if user.role == "teacher" else None,
         "status": classroom.status,
     }
+
+
+class ReviewAttemptRequest(BaseModel):
+    verdict: Literal["correct", "partial", "incorrect"]
+    feedback: str = Field(min_length=1, max_length=2000)
+    error_type: Literal["概念混淆", "条件遗漏", "公式选择错误", "计算错误", "表达不完整"] | None = None
+
+
+@router.get("/classrooms/{classroom_id}/reviews")
+async def pending_reviews(classroom_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    _require_teacher(user)
+    await _owned_classroom(db, classroom_id, user.id)
+    rows = (await db.execute(select(QuestionAttempt, User.name).join(
+        LearningAssignment, LearningAssignment.id == QuestionAttempt.assignment_id
+    ).join(User, User.id == QuestionAttempt.user_id).where(
+        LearningAssignment.classroom_id == classroom_id, QuestionAttempt.verdict == "needs_review"
+    ).order_by(QuestionAttempt.id).limit(50))).all()
+    return [{"id": attempt.id, "student_name": name, "question_id": attempt.question_id,
+             "question": compact_question(get_question(attempt.question_id), include_answer=True),
+             "answer": attempt.answer_text, "reasoning": attempt.reasoning,
+             "image_data_url": attempt.image_data_url, "ocr_text": attempt.ocr_text,
+             "feedback": attempt.feedback} for attempt, name in rows]
+
+
+@router.patch("/classrooms/{classroom_id}/reviews/{attempt_id}")
+async def review_attempt(classroom_id: int, attempt_id: int, payload: ReviewAttemptRequest,
+                         user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    _require_teacher(user)
+    await _owned_classroom(db, classroom_id, user.id)
+    attempt = await db.scalar(select(QuestionAttempt).join(LearningAssignment,
+        LearningAssignment.id == QuestionAttempt.assignment_id).where(
+        QuestionAttempt.id == attempt_id, LearningAssignment.classroom_id == classroom_id).with_for_update())
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="作答不存在或不属于当前班级")
+    if attempt.verdict != "needs_review":
+        raise HTTPException(status_code=409, detail="此作答已经完成复核，请刷新列表")
+    if not payload.feedback.strip():
+        raise HTTPException(status_code=400, detail="请填写复核依据")
+    attempt.verdict = payload.verdict
+    attempt.feedback = payload.feedback.strip()
+    attempt.error_type = None if payload.verdict == "correct" else payload.error_type
+    attempt.grading_source = f"teacher:{user.id}"
+    attempt.grading_version = "human-review-v1"
+    await db.commit()
+    return {"id": attempt_id, "verdict": payload.verdict}
