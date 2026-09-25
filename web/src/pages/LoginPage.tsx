@@ -79,7 +79,6 @@ export default function LoginPage() {
       <main className="login-layout" id="platform">
         <section className="login-story">
           <p className="login-eyebrow">PROBABILITY &amp; STATISTICS ASSISTANT</p>
-          <h1>让概率与统计，<br />看得见、学得会</h1>
           <p className="login-intro">面向概率论与数理统计课程的学习与教学平台。连接专属题库、循序答疑、概率实验和真实学习证据。</p>
           <div className="login-features" id="features">
             <Feature title="1007 道课程题目" icon={<DatabaseOutlined />} />

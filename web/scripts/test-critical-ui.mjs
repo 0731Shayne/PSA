@@ -45,6 +45,7 @@ assert.match(layout, /mode="horizontal"[\s\S]*className="topbar-menu"/);
 assert.doesNotMatch(layout, /className="app-sidebar"/);
 assert.match(login, /function ProbabilityHeroFigure/);
 assert.match(login, /正态分布 N\(μ, σ²\)/);
+assert.doesNotMatch(login, /让概率与统计/);
 assert.match(styles, /\.login-page[\s\S]*background:\s*#3f46f4/);
 assert.match(styles, /@media \(max-width: 979px\)[\s\S]*\.login-page \{ overflow: hidden; \}/);
 
