@@ -11,6 +11,8 @@ const taskRunner = readFileSync(new URL("../src/pages/TaskRunnerPage.tsx", impor
 const classroom = readFileSync(new URL("../src/pages/ClassroomRadarPage.tsx", import.meta.url), "utf8");
 const experiment = readFileSync(new URL("../src/pages/ExperimentLab.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
+const layout = readFileSync(new URL("../src/components/AppLayout.tsx", import.meta.url), "utf8");
+const login = readFileSync(new URL("../src/pages/LoginPage.tsx", import.meta.url), "utf8");
 
 assert.doesNotMatch(
   tutor,
@@ -39,5 +41,11 @@ assert.match(classroom, /interventions\/preview/);
 assert.match(classroom, /此处只是草稿，确认前不会发给学生/);
 assert.match(experiment, /重新打开/);
 assert.match(experiment, /并排比较/);
+assert.match(layout, /mode="horizontal"[\s\S]*className="topbar-menu"/);
+assert.doesNotMatch(layout, /className="app-sidebar"/);
+assert.match(login, /function ProbabilityHeroFigure/);
+assert.match(login, /正态分布 N\(μ, σ²\)/);
+assert.match(styles, /\.login-page[\s\S]*background:\s*#3f46f4/);
+assert.match(styles, /@media \(max-width: 979px\)[\s\S]*\.login-page \{ overflow: hidden; \}/);
 
 console.log("critical UI regression checks passed");

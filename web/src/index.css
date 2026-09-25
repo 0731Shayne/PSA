@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --paper: #f2eee4;
-  --paper-deep: #e9e3d6;
-  --sheet: #fffdf7;
-  --ink: #202a27;
-  --muted: #68716d;
-  --forest: #275b4b;
-  --forest-dark: #193f34;
-  --forest-pale: #e3ece5;
-  --vermillion: #ad533b;
-  --amber: #a66a32;
-  --line: #d4cec1;
-  --line-strong: #bfb7a7;
-  --display-serif: ui-serif, 'Songti SC', STSong, 'Noto Serif CJK SC', Georgia, serif;
+  --paper: #f5f6fa;
+  --paper-deep: #eef0f6;
+  --sheet: #ffffff;
+  --ink: #1f2937;
+  --muted: #667085;
+  --forest: #3f46f4;
+  --forest-dark: #3036d8;
+  --forest-pale: #eef0ff;
+  --vermillion: #3f46f4;
+  --amber: #b7791f;
+  --line: #e3e6ed;
+  --line-strong: #d5dae4;
+  --display-serif: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   color: var(--ink);
   background: var(--paper);
   font-synthesis: none;
@@ -27,10 +27,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background-color: var(--paper);
-  background-image:
-    linear-gradient(rgba(39, 91, 75, .024) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(39, 91, 75, .024) 1px, transparent 1px);
-  background-size: 28px 28px;
+  background-image: none;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 1rem;
   line-height: 1.5;
@@ -655,4 +652,370 @@ body { background-image: none; }
 @media (max-width:640px) {
   .task-runner-page > .ant-alert { padding:10px 12px; }
   .task-runner-page > .ant-alert .ant-alert-description { display:none; }
+}
+
+/* 2026 interface refresh: blue sign-in cover and a quiet, top-navigation workspace. */
+.app-shell {
+  min-height: 100vh;
+  background: #f5f6fa;
+  color: var(--ink);
+}
+
+.demo-banner {
+  display: flex;
+  min-height: 40px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #f1dca5;
+  background: #fffaeb;
+  padding: 6px max(20px, calc((100vw - 1480px) / 2));
+  color: #7a4d0b;
+  font-size: 13px;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(16px);
+}
+
+.app-topbar-inner {
+  display: flex;
+  width: min(1480px, 100%);
+  min-height: 72px;
+  align-items: center;
+  gap: 24px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.app-brand-wrap { width: 226px; flex: none; }
+.brand-button { min-height: 46px; gap: 11px; }
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--forest);
+  box-shadow: none;
+}
+.brand-title { color: #182230; font-family: inherit; font-size: .96rem; font-weight: 760; letter-spacing: 0; }
+.brand-subtitle { margin-top: 1px; color: #98a2b3; font-size: .57rem; font-weight: 700; letter-spacing: .11em; }
+
+.topbar-menu {
+  display: none;
+  min-width: 0;
+  flex: 1;
+  justify-content: center;
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+.topbar-menu::before { display: none !important; }
+.topbar-menu.ant-menu-horizontal > .ant-menu-item {
+  top: 0;
+  height: 72px;
+  margin-inline: 2px;
+  padding-inline: 13px;
+  color: #475467;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 72px;
+}
+.topbar-menu.ant-menu-horizontal > .ant-menu-item:hover { color: var(--forest) !important; }
+.topbar-menu.ant-menu-horizontal > .ant-menu-item-selected { color: var(--forest) !important; }
+.topbar-menu.ant-menu-horizontal > .ant-menu-item::after { right: 13px; bottom: 0; left: 13px; border-bottom-width: 2px; }
+
+.topbar-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+.topbar-menu-trigger { display: inline-flex !important; }
+.account-button { border-radius: 9px; padding: 5px 7px; }
+.account-button:hover { border-color: var(--line); background: #f7f8fa; }
+.account-avatar { background: var(--forest) !important; color: white !important; font-family: inherit; }
+.account-name { color: #344054; }
+.account-role { color: #98a2b3; }
+
+.app-content {
+  width: min(1480px, calc(100% - 40px));
+  max-width: none;
+  min-height: calc(100vh - 112px);
+  margin: 20px auto 32px;
+  border: 1px solid #eceef3;
+  background: #fff;
+  padding: 30px 32px 64px;
+}
+.app-content:focus { outline: none; }
+.app-content > div { animation-duration: 280ms; }
+.app-content :where(.bg-white) { background-color: #fff; }
+.app-content :where(.bg-slate-50) { background-color: #f7f8fa; }
+.app-content :where(.border-slate-200) { border-color: var(--line); }
+.app-content :where(.text-teal-900, .text-teal-800, .text-teal-700) { color: var(--forest-dark); }
+.app-content :where(.bg-teal-50) { background-color: var(--forest-pale); }
+.app-content :where(.border-teal-200, .border-teal-300) { border-color: #c9cdfd; }
+.app-content section[class*='border'][class*='bg-white'],
+.app-content div[class*='border'][class*='bg-white'] { box-shadow: none; }
+.app-content button[class*='transition']:hover { transform: none; }
+
+.app-shell .ant-btn-primary { background: var(--forest); }
+.app-shell .ant-btn-primary:not(:disabled):hover { background: var(--forest-dark); }
+.app-shell .ant-input,
+.app-shell .ant-input-affix-wrapper,
+.app-shell .ant-input-number,
+.app-shell .ant-select-selector,
+.app-shell .ant-upload-drag,
+.app-shell .ant-picker { border-color: var(--line) !important; background: #fff !important; }
+.app-shell .ant-progress-inner { background: #edf0f5; }
+.app-shell .ant-modal-content,
+.app-shell .ant-drawer-content { background: #fff; }
+
+.dashboard-next {
+  border-color: #daddff;
+  border-left-color: var(--forest);
+  background: #f5f6ff;
+}
+.dashboard-metrics,
+.editorial-panel,
+.experiment-workbench { background: #fff; }
+.lesson-example,
+.experiment-controls { background: #f7f8fa; }
+.lesson-example:hover { border-color: var(--forest); background: #f3f4ff; }
+.learning-path-hero,
+.tutor-page > section { box-shadow: none; }
+.learning-path-hero::after,
+.dashboard-hero::after,
+.question-bank-page article::before { display: none; }
+
+.mobile-tabbar {
+  border-color: var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.97);
+  box-shadow: 0 10px 30px rgba(16,24,40,.12);
+}
+.mobile-tabbar button.active { background: var(--forest-pale); color: var(--forest); }
+
+/* Login cover */
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #3f46f4;
+  color: #fff;
+}
+.login-page::before,
+.login-page::after {
+  position: absolute;
+  border-radius: 50%;
+  background: #35a2f5;
+  content: '';
+  pointer-events: none;
+}
+.login-page::before { right: -180px; bottom: -330px; width: 760px; height: 760px; opacity: .64; }
+.login-page::after { right: 27%; bottom: -570px; width: 820px; height: 820px; opacity: .18; }
+.login-header {
+  position: relative;
+  z-index: 2;
+  border-bottom: 1px solid rgba(255,255,255,.16);
+  background: transparent;
+  backdrop-filter: none;
+}
+.login-header-inner {
+  width: min(1180px, 100%);
+  min-height: 76px;
+  padding: 0 28px;
+}
+.login-brand { gap: 12px; }
+.login-brand .brand-mark {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255,255,255,.56);
+  background: rgba(255,255,255,.12);
+}
+.login-brand .brand-mark-axis,
+.login-brand .brand-mark-bars,
+.login-brand .brand-mark-curve { stroke: #fff; }
+.login-brand .brand-mark-point { fill: #fff; stroke: #3f46f4; }
+.login-brand > div > div { color: #fff; font-family: inherit; font-size: .95rem; letter-spacing: .01em; }
+.login-brand p { color: rgba(255,255,255,.65); letter-spacing: .05em; }
+.login-nav { display: flex; align-items: center; gap: 30px; }
+.login-nav a { color: rgba(255,255,255,.78); font-size: 13px; font-weight: 650; text-decoration: none; transition: color .18s ease, background .18s ease; }
+.login-nav a:hover { color: #fff; }
+.login-nav .login-nav-action { border-radius: 999px; background: #fff; padding: 10px 18px; color: #252bb8; }
+
+.login-layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(1180px, 100%);
+  min-height: calc(100vh - 116px);
+  grid-template-columns: minmax(530px, 1.05fr) minmax(430px, .95fr);
+  align-items: center;
+  gap: 56px;
+  padding: 52px 28px 64px;
+}
+.login-story {
+  overflow: visible;
+  border: 0;
+  padding: 0;
+}
+.login-story::before { display: none; }
+.login-eyebrow { margin: 0 0 18px; color: rgba(255,255,255,.66); font-size: .7rem; letter-spacing: .17em; }
+.login-story h1 {
+  max-width: 640px;
+  margin: 0;
+  color: #fff;
+  font-family: inherit;
+  font-size: clamp(2.75rem, 4.6vw, 4.35rem);
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: 1.12;
+}
+.login-intro { max-width: 570px; margin: 22px 0 0; color: rgba(255,255,255,.78); font-size: .95rem; line-height: 1.85; }
+.login-features {
+  display: flex;
+  max-width: 620px;
+  gap: 12px;
+  margin-top: 25px;
+  border: 0;
+}
+.login-feature {
+  min-height: auto;
+  flex: 1;
+  gap: 8px;
+  border: 0 !important;
+  border-radius: 7px;
+  background: rgba(255,255,255,.1);
+  padding: 11px 12px;
+}
+.login-feature > span {
+  width: 28px;
+  height: 28px;
+  border-color: rgba(255,255,255,.35);
+  color: #fff;
+}
+.login-feature h3 { color: #fff; font-size: .74rem; font-weight: 650; }
+
+.login-card {
+  width: min(620px, 100%);
+  margin-top: 28px;
+  scroll-margin-top: 90px;
+  border: 1px solid rgba(255,255,255,.42);
+  border-radius: 12px;
+  background: #fff;
+  padding: 24px 26px;
+  color: #1f2937;
+  box-shadow: 0 22px 55px rgba(22,25,111,.25);
+}
+.login-card-heading { margin-bottom: 20px; border-bottom: 1px solid #eaecf0; padding-bottom: 15px; }
+.login-card-heading p { margin-bottom: 5px; color: var(--forest); font-size: .62rem; letter-spacing: .14em; }
+.login-card-heading h2 { color: #182230; font-family: inherit; font-size: 1.28rem; letter-spacing: -.01em; }
+.login-card-heading span { margin-top: 5px; color: #667085; }
+.login-card .ant-form-item { margin-bottom: 16px; }
+.login-card .ant-form-item-label > label { color: #344054; font-weight: 650; }
+.login-card .ant-input,
+.login-card .ant-input-affix-wrapper { border-color: #d8dce5; border-radius: 8px; background: #fff; }
+.login-card .ant-btn { border-radius: 8px; }
+.login-card .ant-btn-primary { background: var(--forest); }
+.login-card .ant-alert { border-color: #daddff; background: #f5f6ff; }
+.login-register-switch { margin-top: 22px; border-top: 1px solid #eaecf0; padding-top: 18px; text-align: center; color: #667085; font-size: 13px; }
+.login-register-switch button { margin-left: 8px; border: 0; background: transparent; padding: 0; color: var(--forest); font-weight: 700; }
+.demo-role-button { border-color: #e3e6ed; border-radius: 9px; background: #fff; padding: 12px; }
+.demo-role-button:hover { border-color: #aeb3fc; background: #f8f8ff; transform: none; }
+.demo-role-icon { width: 38px; height: 38px; border-color: #daddff; color: var(--forest); }
+.demo-role-icon.primary { border-color: var(--forest); background: var(--forest); color: #fff; }
+.demo-role-arrow { color: #98a2b3; transition: transform .18s ease, color .18s ease; }
+.demo-role-button:hover .demo-role-arrow { color: var(--forest); transform: translateX(2px); }
+
+.probability-hero { position: relative; margin: 0; }
+.probability-plot {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.34);
+  border-radius: 22px;
+  background: rgba(20,24,132,.17);
+  padding: 22px 24px 20px;
+  box-shadow: 0 28px 70px rgba(18,21,116,.23);
+  backdrop-filter: blur(7px);
+}
+.plot-heading { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.2); padding-bottom: 16px; }
+.plot-heading span { color: rgba(255,255,255,.63); font-size: .67rem; font-weight: 750; letter-spacing: .14em; }
+.plot-heading strong { color: #fff; font-family: Georgia, 'Times New Roman', serif; font-size: .92rem; font-weight: 500; }
+.probability-plot svg { display: block; width: 100%; height: auto; margin: 4px 0 0; }
+.plot-grid { fill: none; stroke: rgba(255,255,255,.12); stroke-width: 1; }
+.plot-axis { fill: none; stroke: rgba(255,255,255,.68); stroke-linecap: round; stroke-width: 1.4; }
+.plot-area { fill: url(#normal-area); }
+.plot-curve { fill: none; stroke: #fff; stroke-linecap: round; stroke-width: 4; }
+.plot-guide { fill: none; stroke: #9bd5ff; stroke-dasharray: 7 7; stroke-width: 1.5; }
+.plot-point { fill: #fff; stroke: #60b9ff; stroke-width: 4; }
+.plot-labels { fill: rgba(255,255,255,.76); font-family: Georgia, 'Times New Roman', serif; font-size: 14px; font-style: italic; }
+.plot-formula { display: flex; align-items: baseline; gap: 11px; border-top: 1px solid rgba(255,255,255,.2); padding-top: 17px; color: #fff; font-family: Georgia, 'Times New Roman', serif; }
+.plot-formula span { color: rgba(255,255,255,.64); font-size: .88rem; }
+.plot-formula strong { font-size: clamp(.9rem, 1.5vw, 1.08rem); font-weight: 500; }
+.plot-note { display: flex; align-items: center; gap: 7px; margin-top: 13px; color: rgba(255,255,255,.62); font-size: .69rem; }
+.plot-note span { color: #fff; font-family: Georgia, serif; font-size: .88rem; }
+.plot-note i { width: 1px; height: 12px; margin: 0 3px; background: rgba(255,255,255,.28); }
+.probability-hero figcaption { margin-top: 15px; color: rgba(255,255,255,.57); font-size: .7rem; font-weight: 650; letter-spacing: .12em; text-align: center; }
+.login-footer {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, 100%);
+  min-height: 40px;
+  border-top-color: rgba(255,255,255,.14);
+  padding: 0 28px;
+  color: rgba(255,255,255,.5);
+}
+
+@media (min-width: 1024px) {
+  .topbar-menu { display: flex; }
+  .topbar-menu-trigger { display: none !important; }
+  .mobile-tabbar { display: none; }
+  .app-content { padding-bottom: 48px; }
+}
+
+@media (max-width: 1120px) and (min-width: 1024px) {
+  .app-topbar-inner { gap: 12px; padding-inline: 18px; }
+  .app-brand-wrap { width: 204px; }
+  .topbar-menu.ant-menu-horizontal > .ant-menu-item { padding-inline: 9px; }
+  .topbar-menu.ant-menu-horizontal > .ant-menu-item::after { right: 9px; left: 9px; }
+  .account-role { display: none; }
+}
+
+@media (max-width: 979px) {
+  .login-page { overflow: hidden; }
+  .login-layout { min-height: auto; grid-template-columns: 1fr; gap: 52px; padding-top: 48px; }
+  .login-story { width: min(700px, 100%); }
+  .probability-hero { width: min(620px, 100%); margin: 0 auto; }
+}
+
+@media (max-width: 767px) {
+  .login-header-inner { min-height: 68px; padding-inline: 20px; }
+  .login-brand p { display: none; }
+  .login-nav { gap: 12px; }
+  .login-nav a:not(.login-nav-action) { display: none; }
+  .login-nav .login-nav-action { padding: 8px 14px; }
+  .login-layout { padding: 38px 20px 54px; }
+  .login-story h1 { font-size: clamp(2.45rem, 12vw, 3.5rem); }
+  .login-intro { font-size: .9rem; }
+  .login-features { flex-direction: column; gap: 8px; }
+  .login-feature { flex: auto; }
+  .login-card { padding: 22px 18px; }
+  .probability-plot { border-radius: 15px; padding: 17px 16px; }
+  .plot-heading { padding-bottom: 12px; }
+  .plot-note { flex-wrap: wrap; }
+  .login-footer { padding-inline: 20px; }
+  .app-topbar-inner { min-height: 64px; gap: 12px; padding: 0 16px; }
+  .app-brand-wrap { width: auto; min-width: 0; flex: 1; }
+  .brand-title { font-size: .88rem; }
+  .brand-subtitle { display: none !important; }
+  .app-topbar .brand-mark { width: 36px; height: 36px; }
+  .account-button { padding: 3px; }
+  .app-content {
+    width: 100%;
+    min-height: calc(100vh - 64px);
+    margin: 0;
+    border: 0;
+    padding: 22px 16px 96px;
+  }
+  .demo-banner { padding-inline: 14px; }
 }

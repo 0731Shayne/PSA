@@ -41,31 +41,31 @@ export default function App() {
         locale={zhCN}
         theme={{
           token: {
-            colorPrimary: "#275b4b",
-            colorInfo: "#275b4b",
-            colorSuccess: "#47745b",
-            colorWarning: "#a66a32",
-            colorError: "#a84f3d",
-            colorBgLayout: "#f2eee4",
-            colorBgContainer: "#fffdf7",
-            colorText: "#202a27",
-            colorTextSecondary: "#68716d",
-            colorTextPlaceholder: "#7b827e",
-            colorBorder: "#d4cec1",
-            borderRadius: 7,
-            borderRadiusLG: 10,
+            colorPrimary: "#3f46f4",
+            colorInfo: "#3f46f4",
+            colorSuccess: "#23856d",
+            colorWarning: "#b7791f",
+            colorError: "#d14343",
+            colorBgLayout: "#f5f6fa",
+            colorBgContainer: "#ffffff",
+            colorText: "#1f2937",
+            colorTextSecondary: "#667085",
+            colorTextPlaceholder: "#98a2b3",
+            colorBorder: "#e3e6ed",
+            borderRadius: 8,
+            borderRadiusLG: 12,
             controlHeight: 40,
             fontSizeSM: 13,
             fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
           },
           components: {
-            Button: { fontWeight: 650, primaryShadow: "0 2px 0 rgba(23, 52, 43, 0.14)", defaultShadow: "none" },
+            Button: { fontWeight: 650, primaryShadow: "none", defaultShadow: "none" },
             Card: { headerFontSize: 16 },
             Drawer: { paddingLG: 24 },
-            Menu: { itemBorderRadius: 4, itemHeight: 44, iconSize: 17 },
-            Segmented: { itemSelectedBg: "#fffdf7", trackBg: "#ebe6db" },
-            Table: { headerBg: "#f1ede3", headerColor: "#39433f" },
-            Modal: { contentBg: "#fffdf7", headerBg: "#fffdf7" },
+            Menu: { itemBorderRadius: 6, itemHeight: 44, iconSize: 17 },
+            Segmented: { itemSelectedBg: "#ffffff", trackBg: "#f0f2f7" },
+            Table: { headerBg: "#f7f8fa", headerColor: "#344054" },
+            Modal: { contentBg: "#ffffff", headerBg: "#ffffff" },
           },
         }}
       >
@@ -73,7 +73,7 @@ export default function App() {
           <AppErrorBoundary>
             <AuthProvider>
               <ScrollToTop />
-              <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f2eee4]" aria-live="polite"><Spin size="large" tip="正在进入课程空间…"><div className="h-16 w-52" /></Spin></div>}>
+              <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-[#f5f6fa]" aria-live="polite"><Spin size="large" tip="正在进入课程空间…"><div className="h-16 w-52" /></Spin></div>}>
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/dashboard" element={protectedPage(<Dashboard />)} />
