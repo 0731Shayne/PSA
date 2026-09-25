@@ -67,7 +67,7 @@ export default function LoginPage() {
     <div className="login-page">
       <header className="login-header">
         <div className="login-header-inner">
-          <div className="login-brand"><BrandMark /><div><div>概率统计教学助手</div><p>概率论与数理统计课程平台</p></div></div>
+          <div className="login-brand"><BrandMark /><div><div>概率统计教学平台</div><p>概率论与数理统计课程平台</p></div></div>
           <nav className="login-nav" aria-label="登录页导航">
             <a href="#platform">平台介绍</a>
             <a href="#features">课程能力</a>

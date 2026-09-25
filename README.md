@@ -1,4 +1,4 @@
-# 概率统计教学助手
+# 概率统计教学平台
 
 面向大学概率论与数理统计课程的题库问答与教学助手。系统由 React、FastAPI 和 SQLAlchemy 构建，开发环境可使用 SQLite，正式部署使用 PostgreSQL。
 

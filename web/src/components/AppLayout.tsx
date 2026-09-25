@@ -74,7 +74,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <button onClick={() => go("/dashboard")} className="brand-button" aria-label="返回学习工作台">
       <BrandMark />
       <span className="min-w-0 text-left">
-        <span className="brand-title block truncate">概率统计教学助手</span>
+        <span className="brand-title block truncate">概率统计教学平台</span>
         <span className="brand-subtitle block">PROBABILITY &amp; STATISTICS</span>
       </span>
     </button>

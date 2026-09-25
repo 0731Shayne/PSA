@@ -43,6 +43,8 @@ assert.match(experiment, /重新打开/);
 assert.match(experiment, /并排比较/);
 assert.match(layout, /mode="horizontal"[\s\S]*className="topbar-menu"/);
 assert.doesNotMatch(layout, /className="app-sidebar"/);
+assert.match(layout, /概率统计教学平台/);
+assert.doesNotMatch(layout, /概率统计教学助手/);
 assert.match(login, /function ProbabilityHeroFigure/);
 assert.match(login, /正态分布 N\(μ, σ²\)/);
 assert.doesNotMatch(login, /让概率与统计/);

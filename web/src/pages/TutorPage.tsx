@@ -190,7 +190,7 @@ export default function TutorPage() {
   }
 
   const sidebarContent = <>
-      <div className="mb-5 flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-teal-50 text-teal-800"><RobotOutlined /></span><div><div className="tutor-sidebar-title text-sm font-extrabold">概率统计教学助手</div><div className={`text-sm ${historyError ? "text-rose-600" : "text-emerald-700"}`}>{historyError ? "会话连接异常" : "题库与会话已连接"}</div></div></div>
+      <div className="mb-5 flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-teal-200 bg-teal-50 text-teal-800"><RobotOutlined /></span><div><div className="tutor-sidebar-title text-sm font-extrabold">概率统计教学平台</div><div className={`text-sm ${historyError ? "text-rose-600" : "text-emerald-700"}`}>{historyError ? "会话连接异常" : "题库与会话已连接"}</div></div></div>
       <Button type="primary" block icon={<PlusOutlined />} onClick={newChat} className="!mb-5 !font-bold">新建对话</Button>
       <p className="tutor-sidebar-label mb-2 text-sm font-bold">回答方式</p>
       <Segmented block value={mode} onChange={value => setMode(String(value))} options={[{ label: "讲解答疑", value: "answer" }, { label: "推荐题目", value: "recommend" }]} />
