@@ -10,7 +10,7 @@ PSA 内置 2000 道结构化题目，可按题号检索、推荐练习和展示�
 - RAGFlow 管理文件解析、切片、Embedding、向量索引和混合召回。
 - 模型服务基于“结构化题库 + 已授权课程片段”生成回答。
 
-当 `KNOWLEDGE_BACKEND=ragflow` 时，PSA 的 PostgreSQL 只保存 RAGFlow 数据集/文档 ID 和权限元数据，不保存另一份向量，因此不需要再单独引入 Chroma、Milvus 或 pgvector。本地作品模式的 SQLite 向量实现见 [本地简化 RAG 演示指南](LOCAL_RAG_DEMO.md)。
+当 `KNOWLEDGE_BACKEND=ragflow` 时，PSA 数据库保存 RAGFlow 数据集和文档标识、权限元数据，以及新上传资料的原件。RAGFlow 负责解析和向量索引，迁移部署时需同时备份 PSA 数据库和 RAGFlow 数据。本地模式见 [本地简化 RAG 演示指南](LOCAL_RAG_DEMO.md)。
 
 ## Embedding 和向量化发生在哪里
 

@@ -4,6 +4,7 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 COPY backend/data/images/ /build/backend/data/images/
+COPY backend/data/course_materials/ /build/backend/data/course_materials/
 RUN npm run build
 
 FROM python:3.12-slim AS runtime

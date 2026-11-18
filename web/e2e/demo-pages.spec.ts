@@ -1,5 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+test("login leads to the teacher demo and the bundled notes can be read and downloaded", async ({ page }) => {
+  await page.goto("./login");
+  await expect(page.getByRole("navigation", { name: "登录页导航" })).toHaveCount(0);
+  await expect(page.getByText(/连接专属题库、循序答疑/)).toHaveCount(0);
+  await page.getByRole("button", { name: "进入教师端演示" }).click();
+  await page.goto("./knowledge");
+  await page.getByRole("button", { name: "阅读条件概率与贝叶斯公式" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "用频数表看方向" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭资料预览" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const link = page.getByRole("link", { name: "下载条件概率与贝叶斯公式" });
+  const download = page.waitForEvent("download");
+  await link.click();
+  expect((await download).suggestedFilename()).toBe("条件概率与贝叶斯公式.md");
+});
+
 test("the full bank paginates and displays the supplied question and solution figures", async ({ page }) => {
   await page.goto("./login");
   await page.getByRole("button", { name: /进入教师端演示/ }).click();

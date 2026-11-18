@@ -68,24 +68,17 @@ export default function LoginPage() {
       <header className="login-header">
         <div className="login-header-inner">
           <div className="login-brand"><BrandMark /><div><div>概率统计教学平台</div><p>概率论与数理统计课程平台</p></div></div>
-          <nav className="login-nav" aria-label="登录页导航">
-            <a href="#platform">平台介绍</a>
-            <a href="#features">课程能力</a>
-            <a href="#distribution">概率图谱</a>
-            <a className="login-nav-action" href="#login-entry">进入平台</a>
-          </nav>
         </div>
       </header>
-      <main className="login-layout" id="platform">
+      <main className="login-layout">
         <section className="login-story">
           <p className="login-eyebrow">PROBABILITY &amp; STATISTICS ASSISTANT</p>
-          <p className="login-intro">面向概率论与数理统计课程的学习与教学平台。连接专属题库、循序答疑、概率实验和真实学习证据。</p>
-          <div className="login-features" id="features">
+          <div className="login-features">
             <Feature title="2000 道课程题目" icon={<DatabaseOutlined />} />
             <Feature title="交互式概率实验" icon={<ExperimentOutlined />} />
             <Feature title="分层教学设计" icon={<ReadOutlined />} />
           </div>
-          <div className="login-card" id="login-entry">
+          <div className="login-card">
             <div className="login-card-heading"><p>{staticPreview ? "在线产品演示" : "WELCOME BACK"}</p><h2>{staticPreview ? "选择一个视角开始体验" : register ? "创建账号" : "登录教学平台"}</h2><span>{staticPreview ? "无需账号，演示数据只保存在当前浏览器" : register ? "选择使用身份，进入对应工作台" : "使用你的课程平台账号继续"}</span></div>
             {staticPreview ? <>
               <Alert className="mb-5" showIcon type="info" message="这是模拟数据演示" description="你可以浏览全部页面并体验主要交互；数据仅保存在当前浏览器。" />
@@ -134,7 +127,7 @@ function Feature({ title, icon }: { title: string; icon: React.ReactNode }) {
 }
 
 function ProbabilityHeroFigure() {
-  return <figure className="probability-hero" id="distribution">
+  return <figure className="probability-hero">
     <div className="probability-plot">
       <div className="plot-heading"><span>经典分布</span><strong>正态分布 N(μ, σ²)</strong></div>
       <svg viewBox="0 0 640 500" role="img" aria-labelledby="normal-title normal-desc">

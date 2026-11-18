@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +28,7 @@ from ..db.models import (
     ClassroomKnowledgeSpace,
     ClassroomMembership,
     KnowledgeDocument,
+    KnowledgeDocumentFile,
     KnowledgeSpace,
     User,
 )
@@ -125,15 +128,12 @@ def _document_payload(document: KnowledgeDocument) -> dict[str, Any]:
 
 
 async def _space_payload(db: AsyncSession, space: KnowledgeSpace) -> dict[str, Any]:
-    documents = list(
-        (
-            await db.execute(
-                select(KnowledgeDocument)
-                .where(KnowledgeDocument.space_id == space.id)
-                .order_by(KnowledgeDocument.created_at.desc(), KnowledgeDocument.id.desc())
-            )
-        ).scalars().all()
-    )
+    documents = (await db.execute(
+        select(KnowledgeDocument, KnowledgeDocumentFile.document_id)
+        .outerjoin(KnowledgeDocumentFile, KnowledgeDocumentFile.document_id == KnowledgeDocument.id)
+        .where(KnowledgeDocument.space_id == space.id)
+        .order_by(KnowledgeDocument.created_at.desc(), KnowledgeDocument.id.desc())
+    )).all()
     classroom_ids = list(
         (
             await db.execute(
@@ -152,7 +152,10 @@ async def _space_payload(db: AsyncSession, space: KnowledgeSpace) -> dict[str, A
         "backend": space.backend,
         "embedding_model": space.embedding_model,
         "classroom_ids": classroom_ids,
-        "documents": [_document_payload(item) for item in documents],
+        "documents": [
+            {**_document_payload(item), "has_original": original_id is not None}
+            for item, original_id in documents
+        ],
         "created_at": space.created_at.isoformat() if space.created_at else None,
         "updated_at": space.updated_at.isoformat() if space.updated_at else None,
     }
@@ -436,6 +439,30 @@ async def unbind_knowledge_space(
     return {"bound": False}
 
 
+async def _save_upload(db: AsyncSession, document: KnowledgeDocument, content: bytes) -> None:
+    db.add(document)
+    await db.flush()
+    db.add(KnowledgeDocumentFile(document_id=document.id, content=content))
+    await db.commit()
+    await db.refresh(document)
+
+
+@router.get("/knowledge/documents/{document_id}/original")
+async def download_original(
+    document_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    _require_teacher(user)
+    document, _ = await _owned_document(db, document_id, user.id)
+    original = await db.get(KnowledgeDocumentFile, document_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="平台未留存此文件的原件")
+    return Response(original.content, media_type="application/octet-stream", headers={
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(document.filename, safe='')}",
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
+
+
 @router.post("/knowledge/spaces/{space_id}/documents")
 async def upload_knowledge_document(
     space_id: int,
@@ -485,9 +512,7 @@ async def upload_knowledge_document(
             status="parsing",
             extracted_text=extracted_text,
         )
-        db.add(document)
-        await db.commit()
-        await db.refresh(document)
+        await _save_upload(db, document, content)
         try:
             await index_local_document(db, document)
         except LocalKnowledgeError as exc:
@@ -515,9 +540,7 @@ async def upload_knowledge_document(
         student_visible=student_visible and material_type != "teacher_only",
         status="parsing",
     )
-    db.add(document)
-    await db.commit()
-    await db.refresh(document)
+    await _save_upload(db, document, content)
     try:
         await RAGFlowClient().parse_documents(
             space.provider_dataset_id,

@@ -4,10 +4,11 @@ from itertools import count
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.auth.handler import create_token
-from src.db.models import User
+from src.db.models import KnowledgeDocumentFile, User
 from src.db.session import Base, get_db
 from src.integrations.llm_client import LLMClient
 from src.integrations.local_knowledge import OllamaEmbeddingClient
@@ -151,11 +152,18 @@ async def test_teacher_manages_spaces_and_student_permissions_are_fail_closed(kn
         student_visible=True,
     )
     assert concept.status_code == solution.status_code == private.status_code == 200
+    original_url = f"/api/knowledge/documents/{private.json()['id']}/original"
+    download = await client.get(original_url, headers=teacher_headers)
+    assert download.status_code == 200 and download.content == b"course-material"
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert (await client.get(original_url, headers=knowledge_api["other_teacher_headers"])).status_code == 404
+    assert (await client.get(original_url, headers=student_headers)).status_code == 403
     refreshed = await client.post(
         f"/api/knowledge/spaces/{space['id']}/refresh", headers=teacher_headers
     )
     assert refreshed.status_code == 200
     assert all(item["status"] == "ready" for item in refreshed.json()["documents"])
+    assert all(item["has_original"] for item in refreshed.json()["documents"])
 
     student_spaces = (await client.get("/api/knowledge/spaces", headers=student_headers)).json()
     assert student_spaces[0]["classroom_ids"] == []
@@ -344,6 +352,9 @@ async def test_local_backend_uploads_embeds_retrieves_and_cites_markdown(
     )
     assert uploaded.status_code == 200
     assert uploaded.json()["status"] == "ready"
+    original_url = f"/api/knowledge/documents/{uploaded.json()['id']}/original"
+    download = await client.get(original_url, headers=teacher_headers)
+    assert download.content == "# 条件概率\n\n条件概率定义为 P(A|B)=P(AB)/P(B)。".encode()
 
     response = await client.post(
         "/api/question-bank/assistant",
@@ -357,3 +368,13 @@ async def test_local_backend_uploads_embeds_retrieves_and_cites_markdown(
     assert material_sources[0]["backend"] == "local"
     assert material_sources[0]["document_name"] == "条件概率.md"
     assert material_sources[0]["similarity"] == pytest.approx(1.0)
+
+    # Existing installations have indexed documents without archived originals.
+    async with knowledge_api["sessions"]() as db:
+        await db.execute(delete(KnowledgeDocumentFile).where(
+            KnowledgeDocumentFile.document_id == uploaded.json()["id"]
+        ))
+        await db.commit()
+    old_file = (await client.get("/api/knowledge/spaces", headers=teacher_headers)).json()[0]["documents"][0]
+    assert old_file["status"] == "ready" and not old_file["has_original"]
+    assert (await client.get(original_url, headers=teacher_headers)).status_code == 404

@@ -316,7 +316,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .login-story-index span:first-child { color: var(--vermillion); }
 .login-eyebrow { margin: 40px 0 14px; color: var(--forest); font-size: .73rem; font-weight: 800; letter-spacing: .12em; }
 .login-story h1 { max-width: 660px; margin: 0; font-family: var(--display-serif); font-size: clamp(2.2rem, 4.35vw, 3.85rem); font-weight: 800; letter-spacing: .025em; line-height: 1.2; }
-.login-intro { max-width: 540px; margin: 25px 0 0; color: var(--muted); font-size: .9rem; line-height: 1.9; }
 .login-figure { max-width: 620px; margin: 38px 0 15px; }
 .login-figure svg { display: block; width: 100%; overflow: visible; }
 .login-figure-grid { fill: none; stroke: #bdb5a6; stroke-width: .7; opacity: .4; }
@@ -839,10 +838,6 @@ body { background-image: none; }
 .login-brand .brand-mark-point { fill: #fff; stroke: #3f46f4; }
 .login-brand > div > div { color: #fff; font-family: inherit; font-size: .95rem; letter-spacing: .01em; }
 .login-brand p { color: rgba(255,255,255,.65); letter-spacing: .05em; }
-.login-nav { display: flex; align-items: center; gap: 30px; }
-.login-nav a { color: rgba(255,255,255,.78); font-size: 13px; font-weight: 650; text-decoration: none; transition: color .18s ease, background .18s ease; }
-.login-nav a:hover { color: #fff; }
-.login-nav .login-nav-action { border-radius: 999px; background: #fff; padding: 10px 18px; color: #252bb8; }
 
 .login-layout {
   position: relative;
@@ -862,7 +857,6 @@ body { background-image: none; }
 }
 .login-story::before { display: none; }
 .login-eyebrow { margin: 0 0 18px; color: rgba(255,255,255,.66); font-size: .7rem; letter-spacing: .17em; }
-.login-intro { max-width: 570px; margin: 0; color: rgba(255,255,255,.82); font-size: 1rem; line-height: 1.85; }
 .login-features {
   display: flex;
   max-width: 620px;
@@ -981,11 +975,7 @@ body { background-image: none; }
 @media (max-width: 767px) {
   .login-header-inner { min-height: 68px; padding-inline: 20px; }
   .login-brand p { display: none; }
-  .login-nav { gap: 12px; }
-  .login-nav a:not(.login-nav-action) { display: none; }
-  .login-nav .login-nav-action { padding: 8px 14px; }
   .login-layout { padding: 38px 20px 54px; }
-  .login-intro { font-size: .9rem; }
   .login-features { flex-direction: column; gap: 8px; }
   .login-feature { flex: auto; }
   .login-card { padding: 22px 18px; }

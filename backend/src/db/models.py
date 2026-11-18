@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index, text, false, func, true
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, Index, text, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .session import Base
@@ -152,6 +152,17 @@ class KnowledgeDocument(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class KnowledgeDocumentFile(Base):
+    """Original upload, kept out of metadata and retrieval queries."""
+
+    __tablename__ = "knowledge_document_files"
+
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
 
 class KnowledgeChunk(Base):

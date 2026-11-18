@@ -89,6 +89,7 @@ LOCAL_EMBEDDING_BASE_URL=http://host.docker.internal:11434
 
 - `knowledge_spaces`：教师资料库、后端类型和班级绑定。
 - `knowledge_documents`：文件名、类型、权限、提取全文和处理状态。
+- `knowledge_document_files` 保存新上传文件的原始字节，供资料库所有者下载。记录随所属文档删除。
 - `knowledge_chunks`：文本块、顺序和 JSON 格式 Embedding 向量。
 
 这种设计清楚、可测试、不需要安装额外向量数据库，但检索时会扫描授权文本块，因此只适合几百到几千个切片的作品演示，不适合企业百万级语料。
