@@ -634,7 +634,7 @@ async def test_attempt_diagnostic_normalizes_model_error_taxonomy(api, monkeypat
     monkeypatch.setattr(LLMClient, "chat_json", invalid_label)
     response = await client.post(
         "/api/question-bank/questions/P000080/attempts",
-        json={"answer": "0.5", "reasoning": "直接相除"},
+        json={"reasoning": "我的思路是把两个事件的概率直接相除。"},
         headers=headers,
     )
     assert response.status_code == 200

@@ -3,6 +3,7 @@ WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+COPY backend/data/images/ /build/backend/data/images/
 RUN npm run build
 
 FROM python:3.12-slim AS runtime

@@ -6,6 +6,12 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { normalizeMathMarkdown } from "@/utils/mathMarkdown";
 
+const bankImages = import.meta.glob<string>("../../../backend/data/images/*.jpg", {
+  eager: true,
+  import: "default",
+  query: "?url&no-inline",
+});
+
 interface MathMarkdownProps {
   children: string;
 }
@@ -53,6 +59,11 @@ export function MathMarkdown({ children }: MathMarkdownProps) {
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: "ignore", output: "htmlAndMathml" }]]}
       components={{
+        img: ({ src, alt, title }) => {
+          const filename = src?.match(/^images\/(P\d{6}(?:\(\d+\))?\.jpg)$/)?.[1];
+          const url = filename ? bankImages[`../../../backend/data/images/${filename}`] : src;
+          return <img src={url} alt={alt} title={title} loading="lazy" className="max-w-full h-auto" />;
+        },
         h1: ({ children: heading }) => <h1 id={markdownHeadingId(String(heading))}>{heading}</h1>,
         h2: ({ children: heading }) => <h2 id={markdownHeadingId(String(heading))}>{heading}</h2>,
         h3: ({ children: heading }) => <h3 id={markdownHeadingId(String(heading))}>{heading}</h3>,

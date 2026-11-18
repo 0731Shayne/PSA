@@ -1,4 +1,5 @@
 import { AxiosError, AxiosHeaders, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
+import { demoBankStats, demoTutorSources, loadDemoQuestions, questionSummary } from "./questionBank";
 
 export const isDemoMode = import.meta.env.VITE_STATIC_PREVIEW === "true";
 export const DEMO_ROLE_KEY = "mra-demo-role";
@@ -6,37 +7,15 @@ const DEMO_STATE_KEY = "mra-demo-state-v2";
 
 type DemoRole = "student" | "teacher";
 
-const questions = [
-  { ID: "P000001", qtype: "简答题", hard_level: "易", keypoint: ["样本空间", "随机事件"], question: "抛掷一枚均匀硬币两次，写出样本空间，并指出事件“至少出现一次正面”包含哪些样本点。", choices: null, answer: "$\\Omega=\\{HH,HT,TH,TT\\}$，事件 $A=\\{HH,HT,TH\\}$。", explanation: "按两次抛掷的先后次序列举所有可能结果，再筛选至少含有一个 $H$ 的样本点。", can_reveal: true, teacher_view: true },
-  { ID: "P000082", qtype: "计算题", hard_level: "中", keypoint: ["条件概率", "全概率公式"], question: "某工厂三条生产线的产量占比分别为 $0.2,0.3,0.5$，次品率分别为 $1\\%,2\\%,3\\%$。随机抽取一件产品，求它是次品的概率。", choices: null, answer: "$P(D)=0.2\\times0.01+0.3\\times0.02+0.5\\times0.03=0.023$。", explanation: "将生产线作为完备事件组，使用全概率公式对各来源的次品概率加权。", can_reveal: true, teacher_view: true },
-  { ID: "P000206", qtype: "计算题", hard_level: "中", keypoint: ["贝叶斯公式", "条件概率"], question: "某疾病患病率为 $1\\%$，检测灵敏度为 $95\\%$，特异度为 $90\\%$。某人检测阳性，求其实际患病概率。", choices: null, answer: "$P(D\\mid +)=\\frac{0.01\\times0.95}{0.01\\times0.95+0.99\\times0.10}\\approx0.0876$。", explanation: "分母必须同时包含真阳性与假阳性。低患病率下，即使检测较准，阳性的后验概率也可能不高。", can_reveal: true, teacher_view: true },
-  { ID: "P000311", qtype: "判断题", hard_level: "易", keypoint: ["随机变量", "分布函数"], question: "随机变量的分布函数一定是连续函数。", choices: null, answer: "错误。", explanation: "分布函数右连续，但可能存在跳跃；离散型随机变量的分布函数通常是阶梯函数。", can_reveal: true, teacher_view: true },
-  { ID: "P000405", qtype: "计算题", hard_level: "中", keypoint: ["二项分布", "数学期望"], question: "设 $X\\sim B(20,0.3)$，求 $E(X)$ 与 $D(X)$。", choices: null, answer: "$E(X)=np=6$，$D(X)=np(1-p)=4.2$。", explanation: "二项分布的期望和方差分别为 $np$ 与 $np(1-p)$。", can_reveal: true, teacher_view: true },
-  { ID: "P000512", qtype: "计算题", hard_level: "中", keypoint: ["正态分布", "标准化"], question: "若 $X\\sim N(10,4)$，求 $P(X\\le 12)$，结果可用标准正态分布函数表示。", choices: null, answer: "$P(X\\le12)=\\Phi(1)$。", explanation: "这里标准差为 $2$，标准化得到 $Z=(12-10)/2=1$。", can_reveal: true, teacher_view: true },
-  { ID: "P000614", qtype: "简答题", hard_level: "中", keypoint: ["大数定律", "频率"], question: "说明大数定律中“频率趋近概率”的含义，并指出它是否意味着试验次数增加时误差单调减小。", choices: null, answer: "频率依概率收敛到事件概率，但单次样本路径上的误差不保证单调减小。", explanation: "收敛描述的是偏差超过给定阈值的概率趋于零，不是每增加一次试验误差都变小。", can_reveal: true, teacher_view: true },
-  { ID: "P000737", qtype: "证明题", hard_level: "难", keypoint: ["中心极限定理", "样本均值"], question: "设 $X_1,\\ldots,X_n$ 独立同分布，均值为 $\\mu$、方差为 $\\sigma^2$。写出样本均值的中心极限定理标准化形式。", choices: null, answer: "$\\frac{\\sqrt n(\\bar X-\\mu)}{\\sigma}\\xrightarrow{d}N(0,1)$。", explanation: "先利用 $E(\\bar X)=\\mu$、$D(\\bar X)=\\sigma^2/n$，再按标准差 $\\sigma/\\sqrt n$ 标准化。", can_reveal: true, teacher_view: true },
-  { ID: "P000801", qtype: "计算题", hard_level: "中", keypoint: ["置信区间", "参数估计"], question: "总体方差已知时，写出正态总体均值的 $95\\%$ 置信区间。", choices: null, answer: "$\\bar X\\pm1.96\\frac{\\sigma}{\\sqrt n}$。", explanation: "双侧 $95\\%$ 置信区间对应标准正态分位数 $z_{0.975}=1.96$。", can_reveal: true, teacher_view: true },
-  { ID: "P000886", qtype: "多选题", hard_level: "中", keypoint: ["假设检验", "第一类错误"], question: "关于显著性水平 $\\alpha$，下列说法正确的是哪些？", choices: ["(1) 它控制第一类错误概率", "(2) 越小越容易拒绝原假设", "(3) 通常在检验前给定", "(4) 它就是第二类错误概率"], answer: "(1)、(3)。", explanation: "$\\alpha$ 是原假设为真时错误拒绝它的概率上界，通常在观察数据前确定。", can_reveal: true, teacher_view: true },
-  { ID: "P000942", qtype: "简答题", hard_level: "易", keypoint: ["相关系数", "协方差"], question: "相关系数为零是否意味着两个随机变量相互独立？说明理由。", choices: null, answer: "一般不意味着独立；独立通常推出不相关，反向不成立。", explanation: "在联合正态等附加条件下，不相关才可推出独立。", can_reveal: true, teacher_view: true },
-  { ID: "P001007", qtype: "计算题", hard_level: "难", keypoint: ["最大似然估计", "参数估计"], question: "设总体服从参数为 $\\lambda$ 的指数分布，给出 $\\lambda$ 的最大似然估计。", choices: null, answer: "$\\hat\\lambda=1/\\bar X$。", explanation: "写出似然函数并取对数，对 $\\lambda$ 求导后令其为零。", can_reveal: true, teacher_view: true },
-];
-
-const stats = {
-  total: 1007,
-  qtypes: { "简答题": 264, "计算题": 421, "判断题": 118, "多选题": 96, "证明题": 108 },
-  difficulties: { "易": 338, "中": 469, "难": 200 },
-  keypoints: { "样本空间": 62, "条件概率": 84, "贝叶斯公式": 46, "随机变量": 97, "二项分布": 58, "正态分布": 76, "大数定律": 35, "中心极限定理": 49, "置信区间": 52, "假设检验": 71, "相关系数": 43, "参数估计": 65 },
-};
-
 const classrooms = [
   { id: 1, name: "2026级统计学1班", course_name: "概率论与数理统计", join_code: "DEMO731", members: 32, assignments: 6, status: "active" },
   { id: 2, name: "数据科学实验班", course_name: "概率论与数理统计", join_code: "LAB2026", members: 24, assignments: 4, status: "active" },
 ];
 
 const studentTasks = [
-  { id: 101, classroom_id: 1, classroom_name: "2026级统计学1班", title: "条件概率课前诊断", description: "先独立完成，再按需使用提示；系统会据此安排后续任务。", kind: "diagnostic", topic: "条件概率", question_ids: ["P000001", "P000082", "P000206"], attempted_questions: 1, my_status: "assigned", due_at: "2026-08-15T12:00:00Z" },
-  { id: 102, classroom_id: 1, classroom_name: "2026级统计学1班", title: "贝叶斯方向辨析", description: "针对条件方向混淆进行去提示练习。", kind: "intervention", topic: "贝叶斯公式", question_ids: ["P000082", "P000206"], attempted_questions: 0, my_status: "assigned", group_label: "概念巩固组" },
-  { id: 99, classroom_id: 1, classroom_name: "2026级统计学1班", title: "随机变量基础检测", kind: "diagnostic", topic: "随机变量", question_ids: ["P000311", "P000405"], attempted_questions: 2, my_status: "completed" },
+  { id: 101, classroom_id: 1, classroom_name: "2026级统计学1班", title: "条件概率课前诊断", description: "先独立完成，再按需使用提示；系统会据此安排后续任务。", kind: "diagnostic", topic: "条件概率", question_ids: ["P000001", "P000082", "P000066"], attempted_questions: 1, my_status: "assigned", due_at: "2026-08-15T12:00:00Z" },
+  { id: 102, classroom_id: 1, classroom_name: "2026级统计学1班", title: "贝叶斯方向辨析", description: "针对条件方向混淆进行去提示练习。", kind: "intervention", topic: "贝叶斯公式", question_ids: ["P000082", "P000066"], attempted_questions: 0, my_status: "assigned", group_label: "概念巩固组" },
+  { id: 99, classroom_id: 1, classroom_name: "2026级统计学1班", title: "随机变量基础检测", kind: "diagnostic", topic: "随机变量", question_ids: ["P000103", "P000106"], attempted_questions: 2, my_status: "completed" },
 ];
 
 const learningSummary = {
@@ -61,9 +40,9 @@ const learningProfile = {
     { severity: "medium", keypoint: "中心极限定理", title: "样本均值标准化仍需巩固", message: "能识别正态近似，但两次把标准差写成 $\\sigma/n$。", recommendation: "结合中心极限定理实验，观察样本量与均值波动的关系。", evidence: { attempts: 2, questions: 2, hints: 2, top_error: "标准化尺度错误" } },
   ],
   path: [
-    { order: 1, type: "review", title: "辨清条件的方向", keypoint: "条件概率", reason: "这是贝叶斯公式的直接前置，且已有多次稳定错误证据。", question_ids: ["P000082", "P000206"], difficulty: ["中", "中"], completed: false },
-    { order: 2, type: "experiment", title: "用参数实验理解先验率", keypoint: "贝叶斯公式", reason: "调节患病率，观察相同检测结果下后验概率如何变化。", question_ids: ["P000206"], difficulty: ["中"], experiment_id: "bayes", completed: false },
-    { order: 3, type: "practice", title: "完成无提示迁移", keypoint: "中心极限定理", reason: "在新题型中正确使用 $\\sigma/\\sqrt n$ 完成标准化。", question_ids: ["P000737"], difficulty: ["难"], completed: false },
+    { order: 1, type: "review", title: "辨清条件的方向", keypoint: "条件概率", reason: "这是贝叶斯公式的直接前置，且已有多次稳定错误证据。", question_ids: ["P000082", "P000066"], difficulty: ["易", "中"], completed: false },
+    { order: 2, type: "experiment", title: "用参数实验理解先验率", keypoint: "贝叶斯公式", reason: "调节患病率，观察相同检测结果下后验概率如何变化。", question_ids: ["P000066"], difficulty: ["中"], experiment_id: "bayes", completed: false },
+    { order: 3, type: "practice", title: "完成无提示迁移", keypoint: "中心极限定理", reason: "在新题型中正确使用 $\\sigma/\\sqrt n$ 完成标准化。", question_ids: ["P000359"], difficulty: ["中"], completed: false },
   ],
 };
 
@@ -87,25 +66,25 @@ const radar = {
     { id: 4, name: "许诺", overall_mastery: 75, evidence_level: "medium", attempts: 5, questions: 4, risk_keypoints: 0, next_focus: "无提示迁移", group_label: "迁移挑战组", group_focus: "复杂情境建模", independent_transfer: true },
   ],
   assignments: [
-    { id: 101, title: "条件概率课前诊断", kind: "diagnostic", topic: "条件概率", status: "published", recipient_count: 32, completed_count: 27, question_ids: ["P000001", "P000082", "P000206"], due_at: "2026-08-01T12:00:00Z", created_at: "2026-07-20T08:00:00Z" },
-    { id: 102, title: "贝叶斯方向辨析", kind: "intervention", topic: "贝叶斯公式", status: "published", recipient_count: 9, completed_count: 5, question_ids: ["P000082", "P000206"], created_at: "2026-07-22T08:00:00Z" },
-    { id: 98, title: "随机变量基础检测", kind: "retest", topic: "随机变量", status: "archived", recipient_count: 32, completed_count: 31, question_ids: ["P000311", "P000405"], created_at: "2026-07-10T08:00:00Z" },
+    { id: 101, title: "条件概率课前诊断", kind: "diagnostic", topic: "条件概率", status: "published", recipient_count: 32, completed_count: 27, question_ids: ["P000001", "P000082", "P000066"], due_at: "2026-08-01T12:00:00Z", created_at: "2026-07-20T08:00:00Z" },
+    { id: 102, title: "贝叶斯方向辨析", kind: "intervention", topic: "贝叶斯公式", status: "published", recipient_count: 9, completed_count: 5, question_ids: ["P000082", "P000066"], created_at: "2026-07-22T08:00:00Z" },
+    { id: 98, title: "随机变量基础检测", kind: "retest", topic: "随机变量", status: "archived", recipient_count: 32, completed_count: 31, question_ids: ["P000103", "P000106"], created_at: "2026-07-10T08:00:00Z" },
   ],
 };
 
 const insights = {
   keypoints: ["条件概率", "全概率公式", "贝叶斯公式"],
   prerequisites: { "条件概率": ["样本空间", "乘法公式"], "贝叶斯公式": ["条件概率", "全概率公式"] },
-  layers: { "易": ["P000001"], "中": ["P000082", "P000206"], "难": ["P000737"] },
+  layers: { "易": ["P000001", "P000082"], "中": ["P000066"], "难": ["P001924"] },
   diagnostics: { attempts: 126, verdicts: { correct: 78, partial: 22, incorrect: 26 }, error_types: [{ name: "条件方向混淆", count: 18 }, { name: "忽略先验率", count: 11 }] },
   warnings: [{ severity: "high", title: "条件方向是主要共性断层", detail: "29 名有证据学生中，8 人出现两次以上方向混淆。" }],
 };
 
 const demoPlan = {
   id: 1, title: "贝叶斯公式 · 45分钟分层教学包", topic: "贝叶斯公式", duration: 45, classroom_id: 1, lesson_type: "concept", learner_profile: "mixed",
-  question_ids: ["P000001", "P000082", "P000206", "P000737"],
-  content: "# 贝叶斯公式 · 教师执行版\n\n## 学习目标\n\n1. 区分 $P(A\\mid B)$ 与 $P(B\\mid A)$。\n2. 能从完备事件组出发写出分母。\n3. 能解释先验率对后验概率的影响。\n\n## 课堂流程\n\n- **0—5 分钟**：用 P000082 快速诊断条件方向。\n- **5—15 分钟**：频数表解释真阳性与假阳性。\n- **15—30 分钟**：分层完成 P000206。\n- **30—40 分钟**：小组比较不同先验率。\n- **40—45 分钟**：无提示出门检测。\n\n## 教师提示\n\n先让学生说清“已知什么、求什么”，再写公式，避免直接套用。",
-  student_content: "# 贝叶斯公式 · 学生学习单\n\n## 任务一：写清条件\n\n对 P000082 标出已知事件与目标事件。\n\n## 任务二：构造分母\n\n用树状图列出真阳性和假阳性两条路径。\n\n## 出门检测\n\n独立完成 P000206，并用一句话解释先验率的作用。",
+  question_ids: ["P000001", "P000082", "P000066", "P001924"],
+  content: "# 贝叶斯公式 · 教师执行版\n\n## 学习目标\n\n1. 区分 $P(A\\mid B)$ 与 $P(B\\mid A)$。\n2. 能从完备事件组出发写出分母。\n3. 能解释先验率对后验概率的影响。\n\n## 课堂流程\n\n- **0—5 分钟**：用 P000082 快速诊断条件方向。\n- **5—15 分钟**：频数表解释真阳性与假阳性。\n- **15—30 分钟**：分层完成 P000066。\n- **30—40 分钟**：小组比较不同先验率。\n- **40—45 分钟**：无提示出门检测。\n\n## 教师提示\n\n先让学生说清“已知什么、求什么”，再写公式，避免直接套用。",
+  student_content: "# 贝叶斯公式 · 学生学习单\n\n## 任务一：写清条件\n\n对 P000082 标出已知事件与目标事件。\n\n## 任务二：构造分母\n\n用树状图列出真阳性和假阳性两条路径。\n\n## 出门检测\n\n独立完成 P000066，并用一句话解释先验率的作用。",
   package: {
     version: 1, engine: "course-rules-v1", lesson_type_label: "新授概念课", learner_profile_label: "混合班级", classroom_name: "2026级统计学1班", evidence_note: "基于当前班级 126 次任务作答生成。", keypoints: ["条件概率", "全概率公式", "贝叶斯公式"],
     timeline: [
@@ -114,15 +93,15 @@ const demoPlan = {
       { phase: "分层练习", minutes: 25, teacher_action: "按证据分配任务", student_evidence: "提交过程与解释" },
       { phase: "迁移检测", minutes: 5, teacher_action: "投放无提示题", student_evidence: "独立完成出门票" },
     ],
-    diagnostic_question_id: "P000082", exit_ticket_question_id: "P000206",
+    diagnostic_question_id: "P000082", exit_ticket_question_id: "P000066",
     layers: {
       foundation: { label: "起步任务", fit: "条件方向仍混淆", success: "能正确标记已知与所求", next: "进入进阶任务", question_ids: ["P000001", "P000082"] },
-      progress: { label: "进阶任务", fit: "会写公式但分母不完整", success: "能列出全部来源", next: "进入迁移挑战", question_ids: ["P000206"] },
-      transfer: { label: "迁移挑战", fit: "基础较稳", success: "能在新情境独立建模", next: "完成无提示验证", question_ids: ["P000737"] },
+      progress: { label: "进阶任务", fit: "会写公式但分母不完整", success: "能列出全部来源", next: "进入迁移挑战", question_ids: ["P000066"] },
+      transfer: { label: "迁移挑战", fit: "基础较稳", success: "能在新情境独立建模", next: "完成无提示验证", question_ids: ["P001924"] },
     },
     quality_checks: [{ key: "time", label: "课堂时间闭合", passed: true }, { key: "trace", label: "题目可追溯", passed: true }, { key: "separation", label: "师生版本分离", passed: true }],
   },
-  model: "course-rules-v1", updated_at: "2026-07-23T09:30:00Z", layers: { "易": ["P000001"], "中": ["P000082", "P000206"], "难": ["P000737"] }, insights,
+  model: "course-rules-v1", updated_at: "2026-07-23T09:30:00Z", layers: { "易": ["P000001", "P000082"], "中": ["P000066"], "难": ["P001924"] }, insights,
 };
 
 const sessions = [
@@ -130,26 +109,26 @@ const sessions = [
   { id: 1, title: "推荐条件概率基础题", mode: "recommend", created_at: "2026-07-20T08:00:00Z", updated_at: "2026-07-20T08:12:00Z" },
 ];
 
-const sessionMessages = {
+const sessionMessages = (questions: Awaited<ReturnType<typeof demoTutorSources>>) => ({
   2: { session: sessions[0], messages: [
     { id: 1, role: "user", content: "贝叶斯公式为什么要考虑先验概率？" },
     { id: 2, role: "assistant", content: "因为同一个观测结果，在不同基础发生率下含义不同。\\n\\n以检测阳性为例，后验概率为：\\n\\n$$P(D\\mid +)=\\frac{P(+\\mid D)P(D)}{P(+\\mid D)P(D)+P(+\\mid \\bar D)P(\\bar D)}$$\\n\\n其中 $P(D)$ 就是先验率。它决定真阳性在人群中的基础数量。", sources: [questions[2]], model: "demo" },
   ] },
   1: { session: sessions[1], messages: [
     { id: 3, role: "user", content: "推荐条件概率基础题" },
-    { id: 4, role: "assistant", content: "建议按 P000001 → P000082 → P000206 的顺序练习：先列样本空间，再用全概率公式，最后进入贝叶斯公式。", sources: [questions[0], questions[1], questions[2]], model: "demo" },
+    { id: 4, role: "assistant", content: "建议按 P000001 → P000082 → P000066 的顺序练习：先列样本空间，再求条件概率，最后进入贝叶斯公式。", sources: [questions[0], questions[1], questions[2]], model: "demo" },
   ] },
-};
+});
 
 const experimentCatalog = [
-  { experiment_id: "coin", keypoints: ["大数定律", "频率"], question_ids: ["P000614"] },
-  { experiment_id: "binomial", keypoints: ["二项分布"], question_ids: ["P000405"] },
-  { experiment_id: "normal", keypoints: ["正态分布"], question_ids: ["P000512"] },
-  { experiment_id: "clt", keypoints: ["中心极限定理"], question_ids: ["P000737"] },
-  { experiment_id: "bayes", keypoints: ["贝叶斯公式", "条件概率"], question_ids: ["P000206"] },
-  { experiment_id: "confidence", keypoints: ["置信区间"], question_ids: ["P000801"] },
-  { experiment_id: "montecarlo", keypoints: ["随机模拟"], question_ids: ["P000614"] },
-  { experiment_id: "poisson", keypoints: ["泊松近似", "二项分布"], question_ids: ["P000405"] },
+  { experiment_id: "coin", keypoints: ["大数定律", "频率"], question_ids: ["P000400"] },
+  { experiment_id: "binomial", keypoints: ["二项分布"], question_ids: ["P000106"] },
+  { experiment_id: "normal", keypoints: ["正态分布"], question_ids: ["P000178"] },
+  { experiment_id: "clt", keypoints: ["中心极限定理"], question_ids: ["P000359"] },
+  { experiment_id: "bayes", keypoints: ["贝叶斯公式", "条件概率"], question_ids: ["P000066"] },
+  { experiment_id: "confidence", keypoints: ["置信区间"], question_ids: ["P000489"] },
+  { experiment_id: "montecarlo", keypoints: ["随机模拟"], question_ids: ["P000400"] },
+  { experiment_id: "poisson", keypoints: ["泊松近似", "二项分布"], question_ids: ["P000152"] },
 ];
 
 type DemoExperimentRun = { seed?:number; algorithm_version?:string; id: number; experiment_id: string; parameters: Record<string, number>; result_summary: string; observation: string; created_at: string };
@@ -206,19 +185,28 @@ function body(config: InternalAxiosRequestConfig): Record<string, unknown> {
   return config.data as Record<string, unknown>;
 }
 
-function questionList(config: InternalAxiosRequestConfig) {
+async function bankQuestion(id: string, config: InternalAxiosRequestConfig) {
+  const row = (await loadDemoQuestions()).find(item => item.ID === id.toUpperCase());
+  if (!row) throw new AxiosError("题目不存在", "404", config, undefined, response(config, { detail: "题目不存在" }, 404));
+  return row;
+}
+
+async function questionList(config: InternalAxiosRequestConfig) {
   const params = (config.params || {}) as Record<string, string | number | undefined>;
   const query = String(params.query || "").trim().toLowerCase();
   const qtype = String(params.qtype || "");
   const difficulty = String(params.difficulty || "");
   const keypoint = String(params.keypoint || "");
-  const filtered = questions.filter(item =>
+  const filtered = (await loadDemoQuestions()).filter(item =>
     (!query || item.ID.toLowerCase().includes(query) || item.question.toLowerCase().includes(query) || item.keypoint.some(value => value.toLowerCase().includes(query))) &&
     (!qtype || item.qtype === qtype) &&
     (!difficulty || item.hard_level === difficulty) &&
     (!keypoint || item.keypoint.includes(keypoint))
   );
-  return { items: filtered, total: filtered.length, page: 1, page_size: 12 };
+  const page = Math.max(1, Number(params.page) || 1);
+  const pageSize = Math.max(1, Number(params.page_size) || 12);
+  const start = (page - 1) * pageSize;
+  return { items: filtered.slice(start, start + pageSize).map(questionSummary), total: filtered.length, page, page_size: pageSize };
 }
 
 export const demoAdapter: AxiosAdapter = async config => {
@@ -227,7 +215,7 @@ export const demoAdapter: AxiosAdapter = async config => {
   const method = (config.method || "get").toLowerCase();
   const state = loadState();
 
-  if (url === "/api/question-bank/stats") return response(config, stats);
+  if (url === "/api/question-bank/stats") return response(config, await demoBankStats());
   if (url === "/api/question-bank/learning-summary") return response(config, {...learningSummary, graded_questions:12,pending_review:(state.attempts || []).filter(a=>a.verdict==="needs_review").length});
   if(url === "/api/question-bank/attempts") {
     const params=config.params || {};
@@ -253,19 +241,20 @@ export const demoAdapter: AxiosAdapter = async config => {
     saveState(state);
     return response(config, { deleted: Number(experimentRunMatch[1]) });
   }
-  if (url === "/api/question-bank/questions" && method === "get") return response(config, questionList(config));
+  if (url === "/api/question-bank/questions" && method === "get") return response(config, await questionList(config));
 
   const answerMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/answer$/i);
   if (answerMatch) {
     const qid=answerMatch[1].toUpperCase();
+    const selected = await bankQuestion(qid, config);
     state.exposed=[...new Set([...(state.exposed || []),qid])];saveState(state);
-    return response(config, questions.find(item => item.ID === qid) || questions[0]);
+    return response(config, { answer: selected.answer, explanation: selected.explanation });
   }
   const hintMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/hint$/i);
   if (hintMatch) {state.exposed=[...new Set([...(state.exposed || []),hintMatch[1].toUpperCase()])];saveState(state);return response(config, { hint: "先写清楚已知事件和目标事件，再判断分母是否需要把所有可能来源相加。" });}
   const attemptMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})\/attempts$/i);
   if (attemptMatch) {
-    const selected = questions.find(item => item.ID === attemptMatch[1].toUpperCase()) || questions[0];
+    const selected = await bankQuestion(attemptMatch[1], config);
     const values = body(config);
     const canonical=(value:unknown)=>String(value || "").trim().replace(/^\$\$([\s\S]*)\$\$$/,"$1").replace(/^\$([\s\S]*)\$$/,"$1").trim().replace(/\s+/g," ");
     const exact=Boolean(values.answer) && canonical(values.answer)===canonical(selected.answer);
@@ -282,7 +271,7 @@ export const demoAdapter: AxiosAdapter = async config => {
   }
   const questionMatch = url.match(/^\/api\/question-bank\/questions\/(P\d{6})$/i);
   if (questionMatch) {
-    const selected = questions.find(item => item.ID === questionMatch[1].toUpperCase()) || questions[0];
+    const selected = await bankQuestion(questionMatch[1], config);
     const assignmentId = Number((config.params as Record<string, unknown> | undefined)?.assignment_id || 0);
     const task = studentTasks.find(item => item.id === assignmentId);
     const role = (localStorage.getItem(DEMO_ROLE_KEY) || "student") as DemoRole;
@@ -303,14 +292,20 @@ export const demoAdapter: AxiosAdapter = async config => {
   const assignmentDetailMatch = url.match(/^\/api\/assignments\/(\d+)$/);
   if (assignmentDetailMatch && method === "get") {
     const task = studentTasks.find(item => item.id === Number(assignmentDetailMatch[1]));
-    if (task) return response(config, { ...taskProgress(task), hint_policy: task.kind === "retest" ? "blocked" : task.kind === "intervention" ? "reduced" : "allowed", transfer_question_id: task.kind === "diagnostic" ? undefined : task.question_ids[task.question_ids.length - 1], attempted_question_ids: taskProgress(task).attempted_question_ids, questions: task.question_ids.map(id => questions.find(item => item.ID === id)).filter(Boolean) });
+    if (task) {
+      const questions = await Promise.all(task.question_ids.map(id => bankQuestion(id, config)));
+      return response(config, { ...taskProgress(task), hint_policy: task.kind === "retest" ? "blocked" : task.kind === "intervention" ? "reduced" : "allowed", transfer_question_id: task.kind === "diagnostic" ? undefined : task.question_ids[task.question_ids.length - 1], questions: questions.map(questionSummary) });
+    }
   }
-  if (/^\/api\/classrooms\/\d+\/reviews$/.test(url)) return response(config,(state.attempts || []).filter(a=>a.assignment_id && a.verdict==="needs_review").map(a=>({...a,question:questions.find(q=>q.ID===a.question_id)})));
+  if (/^\/api\/classrooms\/\d+\/reviews$/.test(url)) {
+    const questions = await loadDemoQuestions();
+    return response(config,(state.attempts || []).filter(a=>a.assignment_id && a.verdict==="needs_review").map(a=>({...a,question:questions.find(q=>q.ID===a.question_id)})));
+  }
   if (/^\/api\/classrooms\/\d+\/reviews\/\d+$/.test(url) && method==="patch") {const a=state.attempts?.find(a=>a.id===Number(url.split("/").slice(-1)[0]));if(a){a.verdict=String(body(config).verdict);a.feedback=String(body(config).feedback);saveState(state);}return response(config,{ok:true});}
   if (/^\/api\/classrooms\/\d+\/radar$/.test(url)) return response(config, { ...radar, summary:{...radar.summary,pending_review:(state.attempts || []).filter(a=>a.assignment_id && a.verdict==="needs_review").length}, classroom: state.classrooms.find(item => item.id === Number(url.split("/")[3])) || radar.classroom });
   if (/^\/api\/classrooms\/\d+\/interventions\/preview$/.test(url)) {
     const values = body(config);
-    const tasks = radar.groups.map((group, index) => { const ids = index === 0 ? ["P000001", "P000082"] : index === 1 ? ["P000082", "P000206"] : ["P000206", "P000737"]; const kind = group.type === "transfer_ready" ? "retest" : "intervention"; return { group_key: group.key, group_label: group.label, focus: group.focus, strategy: group.strategy, student_ids: group.student_ids, question_ids: ids, kind, title: `${group.label} · ${group.focus}`, description: `${group.strategy}最后一道题作为无提示迁移验证。`, hint_policy: kind === "retest" ? "blocked" : "reduced", transfer_question_id: ids[ids.length - 1], due_at: null }; });
+    const tasks = radar.groups.map((group, index) => { const ids = index === 0 ? ["P000001", "P000082"] : index === 1 ? ["P000082", "P000066"] : ["P000066", "P001924"]; const kind = group.type === "transfer_ready" ? "retest" : "intervention"; return { group_key: group.key, group_label: group.label, focus: group.focus, strategy: group.strategy, student_ids: group.student_ids, question_ids: ids, kind, title: `${group.label} · ${group.focus}`, description: `${group.strategy}最后一道题作为无提示迁移验证。`, hint_policy: kind === "retest" ? "blocked" : "reduced", transfer_question_id: ids[ids.length - 1], due_at: null }; });
     return response(config, { source_assignment_id: values.source_assignment_id, tasks, groups: tasks.length, students: tasks.reduce((sum, item) => sum + item.student_ids.length, 0) });
   }
   if (/^\/api\/classrooms\/\d+\/interventions$/.test(url)) return response(config, { groups: 3, students: 9 }, 201);
@@ -344,7 +339,10 @@ export const demoAdapter: AxiosAdapter = async config => {
 
   if (url === "/api/question-bank/sessions") return response(config, sessions);
   const messagesMatch = url.match(/^\/api\/question-bank\/sessions\/(\d+)\/messages$/);
-  if (messagesMatch) return response(config, sessionMessages[Number(messagesMatch[1]) as keyof typeof sessionMessages] || sessionMessages[2]);
+  if (messagesMatch) {
+    const history = sessionMessages(await demoTutorSources());
+    return response(config, history[Number(messagesMatch[1]) as keyof typeof history] || history[2]);
+  }
   if (/^\/api\/question-bank\/sessions\/\d+$/.test(url)) return response(config, { ok: true });
 
   if (url === "/api/auth/me") {
@@ -356,12 +354,10 @@ export const demoAdapter: AxiosAdapter = async config => {
   return response(config, { ok: true });
 };
 
-export const demoTutorSources = questions.slice(0, 3).map(({ ID, qtype, question, keypoint, hard_level }) => ({ ID, qtype, question, keypoint, hard_level }));
-
 export function demoTutorAnswer(message: string, mode: string, guidanceMode: string) {
   if (mode === "recommend") {
-    return "我从演示题库中为你安排了 3 道题：\n\n1. **P000001**：用样本空间建立事件意识（易）\n2. **P000082**：使用全概率公式整合不同来源（中）\n3. **P000206**：进入贝叶斯后验概率（中）\n\n建议按顺序独立作答；遇到困难时先使用一次提示。";
+    return "我从演示题库中为你安排了 3 道题：\n\n1. **P000001**：用样本空间建立事件意识（易）\n2. **P000082**：根据已知事件求条件概率（易）\n3. **P000066**：进入贝叶斯后验概率（中）\n\n建议按顺序独立作答；遇到困难时先使用一次提示。";
   }
   const prefix = guidanceMode === "hint" ? "先给你一个关键提示" : guidanceMode === "check" ? "我们先检查思路" : guidanceMode === "full" ? "下面给出完整演示解析" : "我们分三步来理解";
-  return `${prefix}：\n\n1. **写清条件**：贝叶斯问题里要先区分 $P(A\\mid B)$ 与 $P(B\\mid A)$。\n2. **补全分母**：分母代表观测结果发生的全部路径，通常需要全概率公式。\n3. **代入先验**：基础发生率 $P(A)$ 会直接影响后验概率。\n\n以 P000206 为例：\n\n$$P(D\\mid +)=\\frac{P(+\\mid D)P(D)}{P(+\\mid D)P(D)+P(+\\mid \\bar D)P(\\bar D)}$$\n\n你刚才的问题“${message.slice(0, 36)}”可以先从标出已知事件和目标事件开始。`;
+  return `${prefix}：\n\n1. **写清条件**：贝叶斯问题里要先区分 $P(A\\mid B)$ 与 $P(B\\mid A)$。\n2. **补全分母**：分母代表观测结果发生的全部路径，通常需要全概率公式。\n3. **代入先验**：基础发生率 $P(A)$ 会直接影响后验概率。\n\n以检测阳性为例：\n\n$$P(D\\mid +)=\\frac{P(+\\mid D)P(D)}{P(+\\mid D)P(D)+P(+\\mid \\bar D)P(\\bar D)}$$\n\n你刚才的问题“${message.slice(0, 36)}”可以先从标出已知事件和目标事件开始。`;
 }

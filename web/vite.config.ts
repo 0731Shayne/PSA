@@ -1,10 +1,28 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
+const demoBankFile = "question-bank.jsonl";
+const bankPath = path.resolve(__dirname, "../backend/data/probability_questions.jsonl");
+
+const staticQuestionBank: Plugin = {
+  name: "static-demo-question-bank",
+  apply: (_, { mode }) => loadEnv(mode, __dirname, "VITE_").VITE_STATIC_PREVIEW === "true",
+  generateBundle() {
+    this.emitFile({ type: "asset", fileName: demoBankFile, source: readFileSync(bankPath) });
+  },
+  configureServer(server) {
+    server.middlewares.use(`${server.config.base}${demoBankFile}`, (_req, res) => {
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.end(readFileSync(bankPath));
+    });
+  },
+};
+
 export default defineConfig({
-  plugins: [tailwindcss(), react()],
+  plugins: [tailwindcss(), react(), staticQuestionBank],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

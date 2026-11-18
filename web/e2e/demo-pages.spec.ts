@@ -1,5 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+test("the full bank paginates and displays the supplied question and solution figures", async ({ page }) => {
+  await page.goto("./login");
+  await page.getByRole("button", { name: /进入教师端演示/ }).click();
+  await page.goto("./questions?page=167");
+  await expect(page.getByText(/共收录 2000 道题/)).toBeVisible();
+  await expect(page.locator("article")).toHaveCount(8);
+  await expect(page.getByText("P002000", { exact: true })).toBeVisible();
+
+  await page.goto("./questions?query=P000111");
+  const detail = page.getByRole("dialog");
+  const stemImage = detail.getByRole("img", { name: "P000111 题干配图" });
+  await stemImage.scrollIntoViewIfNeeded();
+  await expect.poll(() => stemImage.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+
+  await page.goto("./questions?query=P001878");
+  const figures = detail.getByRole("img", { name: /P001878 解析配图/ });
+  await expect(detail.getByRole("heading", { name: "题目", exact: true })).toBeVisible();
+  await expect(figures).toHaveCount(0);
+  await detail.getByRole("button", { name: "查看答案与解析" }).click();
+  await expect(figures).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    const figure = figures.nth(i);
+    await expect(figure).toHaveAttribute("alt", `P001878 解析配图 ${i + 1}`);
+    await figure.scrollIntoViewIfNeeded();
+    await expect.poll(() => figure.evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  }
+});
+
 test("teacher demo exposes evidence and teaching workflows", async ({ page }) => {
   await page.goto("./login");
   await page.getByRole("button", { name: /进入教师端演示/ }).click();

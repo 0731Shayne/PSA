@@ -10,7 +10,7 @@
 - 探究实验：提供大数定律、概率分布、极限定理、贝叶斯、置信区间与蒙特卡洛等 8 个参数化实验，并关联题库练习
 - 教师端：按主题、课时、课堂类型、学情基线和指定题号生成教师执行版、无答案学生学习单与证据报告，可编辑、保存、分别导出，并把任一层级直接发布为班级任务
 - 身份登录：账号分为 `student` 和 `teacher`，教师注册需要部署方配置的邀请码；浏览器会话使用 HttpOnly Cookie
-- 专属题库：内置 `P000001`—`P001007` 共 1007 道题
+- 专属题库：内置 `P000001`—`P002000` 共 2000 道题，含 54 张配图。
 - 可替换 RAG 课程资料库：本地作品模式由 Ollama `bge-m3` 生成真实 Embedding、SQLite 保存向量并计算余弦相似度；企业模式切换到 RAGFlow。资料可绑定班级，回答会展示题目与文件片段两类依据
 - 会话记忆：自动保存历史会话，并携带最近 20 条消息支持连续追问
 
@@ -196,7 +196,7 @@ docker compose exec -T db pg_restore -U mra -d mra --clean --if-exists < mra.bac
 {"ID":"P000001","qtype":"简答题","question":"...","keypoint":["样本空间"],"answer":"...","explanation":"...","hard_level":"易"}
 ```
 
-题库文件不存放在 PostgreSQL 中，切换数据库不会改变题库内容。
+克隆仓库或在 GitHub 下载 ZIP 即可取得完整题库。配图保存在 [backend/data/images](backend/data/images)，每题的 `images` 字段列出对应文件名，多图按列表顺序排列。题干或解析中的 Markdown 图片路径相对于题库文件。正式平台和 GitHub Pages 演示共用这份题库，无需导入数据库。
 
 ## 验证
 

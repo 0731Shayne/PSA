@@ -4,7 +4,7 @@
 
 - `web/`：React 单页应用，提供学生学习空间和教师工作空间。
 - `backend/src/`：FastAPI 应用，负责身份、题库、答疑、教学包、班级任务与学习分析。
-- `backend/data/probability_questions.jsonl`：1007 道只读课程题库，部署时随镜像交付。
+- `backend/data/probability_questions.jsonl` 包含 2000 道课程题目，配图存放在同目录下的 `images/`。题库与配图随仓库和部署镜像交付。
 - PostgreSQL：正式环境的账号、班级、任务、作答、会话和教学包数据。
 - Alembic：数据库结构升级；容器启动时先执行迁移，再启动应用。
 - 模型服务：由部署企业通过 `DEEPSEEK_API_KEY` 配置；分层教学包规则引擎不依赖模型 Key。

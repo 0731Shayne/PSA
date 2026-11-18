@@ -81,7 +81,7 @@ export default function LoginPage() {
           <p className="login-eyebrow">PROBABILITY &amp; STATISTICS ASSISTANT</p>
           <p className="login-intro">面向概率论与数理统计课程的学习与教学平台。连接专属题库、循序答疑、概率实验和真实学习证据。</p>
           <div className="login-features" id="features">
-            <Feature title="1007 道课程题目" icon={<DatabaseOutlined />} />
+            <Feature title="2000 道课程题目" icon={<DatabaseOutlined />} />
             <Feature title="交互式概率实验" icon={<ExperimentOutlined />} />
             <Feature title="分层教学设计" icon={<ReadOutlined />} />
           </div>

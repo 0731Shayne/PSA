@@ -4,7 +4,8 @@ import { BookOutlined, BulbOutlined, DeleteOutlined, EyeOutlined, FileTextOutlin
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { MathMarkdown } from "@/components/MathMarkdown";
-import { demoTutorAnswer, demoTutorSources, isDemoMode } from "@/demo/demoApi";
+import { demoTutorAnswer, isDemoMode } from "@/demo/demoApi";
+import { demoTutorSources } from "@/demo/questionBank";
 
 interface QuestionSource { kind?: "question"; ID: string; qtype: string; question: string; keypoint: string[]; hard_level: string }
 interface MaterialSource { kind: "material"; id: string; document_id: string; document_name: string; content: string; similarity: number; positions?: unknown[]; backend?: "local" | "ragflow" }
@@ -134,7 +135,8 @@ export default function TutorPage() {
         const answer = demoTutorAnswer(text, requestedMode, guidanceMode);
         const chunks = answer.match(/[\s\S]{1,24}/g) || [answer];
         setActiveSession(demoSessionId);
-        setMessages(current => current.map((item, index) => index === current.length - 1 ? { ...item, sources: demoTutorSources } : item));
+        const sources = await demoTutorSources();
+        setMessages(current => current.map((item, index) => index === current.length - 1 ? { ...item, sources } : item));
         for (const chunk of chunks) {
           if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
           await new Promise(resolve => window.setTimeout(resolve, 28));

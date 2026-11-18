@@ -1,8 +1,10 @@
 from src.question_bank.handler import _carried_question_ids, _grounded_tutor_fallback
 from src.question_bank.service import (
+    DEFAULT_BANK_PATH,
     bank_stats,
     get_question,
     is_contextual_follow_up,
+    load_questions,
     requested_recommendation_count,
     retrieve_context,
     search_questions,
@@ -10,9 +12,26 @@ from src.question_bank.service import (
 
 
 def test_bank_has_expected_range_and_count():
-    assert bank_stats()["total"] == 1007
-    assert get_question("P000001")["ID"] == "P000001"
-    assert get_question("P001007")["ID"] == "P001007"
+    assert bank_stats()["total"] == 2000
+    assert [row["ID"] for row in load_questions()] == [f"P{i:06d}" for i in range(1, 2001)]
+
+
+def test_bundled_figures_match_questions_and_display_order():
+    referenced = []
+    for row in load_questions():
+        if not isinstance(row["images"], list):
+            continue
+        content = "\n".join(row[key] for key in ("question", "answer", "explanation"))
+        positions = []
+        for name in row["images"]:
+            assert name.split(".")[0].split("(")[0] == row["ID"]
+            marker = f"](images/{name})"
+            assert content.count(marker) == 1
+            positions.append(content.index(marker))
+            referenced.append(name)
+        assert positions == sorted(positions)
+    assert len(referenced) == 54
+    assert sorted(referenced) == sorted(p.name for p in (DEFAULT_BANK_PATH.parent / "images").glob("*.jpg"))
 
 
 def test_search_by_id_and_keypoint():
