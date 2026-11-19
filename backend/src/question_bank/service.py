@@ -63,6 +63,7 @@ def search_questions(
     keypoint: str = "",
     page: int = 1,
     page_size: int = 20,
+    minimum_coverage: float = 0.45,
 ) -> tuple[list[dict[str, Any]], int]:
     rows = load_questions()
     filtered = [
@@ -99,7 +100,7 @@ def search_questions(
                 value += (question_overlap + keypoint_overlap) / len(q_tokens) * 25
             return value
 
-        min_overlap = max(1, math.ceil(len(q_tokens) * 0.45))
+        min_overlap = max(1, math.ceil(len(q_tokens) * minimum_coverage))
         scored = []
         for row in filtered:
             text = _search_text(row)
@@ -146,7 +147,13 @@ def bank_stats() -> dict[str, Any]:
     }
 
 
-def retrieve_context(message: str, question_ids: list[str] | None = None, limit: int = 5) -> list[dict[str, Any]]:
+def retrieve_context(
+    message: str,
+    question_ids: list[str] | None = None,
+    limit: int = 5,
+    *,
+    minimum_coverage: float = 0.45,
+) -> list[dict[str, Any]]:
     chosen: list[dict[str, Any]] = []
     seen: set[str] = set()
     embedded_ids = re.findall(r"P\d{6}", message.upper())
@@ -224,7 +231,12 @@ def retrieve_context(message: str, question_ids: list[str] | None = None, limit:
         if not added:
             break
 
-    matches, _ = search_questions(message, difficulty=difficulty, page_size=max(limit * 2, 10))
+    matches, _ = search_questions(
+        message,
+        difficulty=difficulty,
+        page_size=max(limit * 2, 10),
+        minimum_coverage=minimum_coverage,
+    )
     for row in matches:
         if row["ID"] not in seen:
             chosen.append(row)

@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import UniqueConstraint
@@ -552,6 +553,7 @@ async def test_tutor_respects_recommendation_count_and_safe_fallback(api, monkey
     assert recommendation.status_code == 200
     suggested = recommendation.json()
     assert len(suggested["sources"]) == 3
+    assert suggested["model"] == "question-bank-retrieval"
     assert all("样本空间" in source["keypoint"] for source in suggested["sources"])
     assert "3 道题" in suggested["answer"]
 
@@ -569,6 +571,77 @@ async def test_tutor_respects_recommendation_count_and_safe_fallback(api, monkey
     assert hint.json()["model"] == "question-bank-fallback"
     assert "标准解析" not in hint.json()["answer"]
     assert str(question["answer"]) not in hint.json()["answer"]
+
+
+async def test_recommendation_uses_intent_filters_and_stream_excludes_previous_questions(api, monkeypatch):
+    client, _teacher_token, student_token = api
+    headers = {"Authorization": f"Bearer {student_token}"}
+    monkeypatch.setenv("DEEPSEEK_MOCK", "false")
+    requests = []
+
+    async def interpret(self, messages, **options):
+        assert self.name == "question_bank_recommendation_intent"
+        assert options["response_format"] == {"type": "json_object"}
+        assert options["thinking"] is False
+        request = json.loads(messages[0].content)
+        requests.append(request)
+        assert "贝叶斯公式" in request["题库知识点"]
+        return {
+            "keypoints": ["贝叶斯公式"],
+            "difficulty": "易",
+            "qtype": "计算题",
+            "count": 2,
+            "exclude_previous": len(requests) == 2,
+            "question_ids": ["P999999"],
+        }
+
+    monkeypatch.setattr(LLMClient, "chat_json", interpret)
+    first = await client.post(
+        "/api/question-bank/assistant",
+        json={"message": "我想练几道观测到结果之后再反推来源的题", "mode": "recommend"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    recommendation = first.json()
+    assert recommendation["model"] == "question-bank-intent"
+    stream = await client.post(
+        "/api/question-bank/assistant/stream",
+        json={"message": "再给我两道类似的", "mode": "recommend", "session_id": recommendation["session_id"]},
+        headers=headers,
+    )
+    assert stream.status_code == 200
+    events = {event["event"]: event["data"] for line in stream.text.splitlines() if (event := json.loads(line))}
+    assert events["done"]["model"] == "question-bank-intent"
+    assert any("贝叶斯公式" in labels for labels in requests[1]["上一组题目知识点"])
+    groups = [recommendation["sources"], events["meta"]["sources"]]
+    assert all(len(group) == 2 for group in groups)
+    assert len({source["ID"] for group in groups for source in group}) == 4
+    for source in groups[0] + groups[1]:
+        assert get_question(source["ID"]) is not None
+        assert "贝叶斯公式" in source["keypoint"]
+        assert source["hard_level"] == "易"
+        assert source["qtype"] == "计算题"
+
+
+@pytest.mark.parametrize("unusable", [{"count": "3"}, {"keypoints": ["题库里不存在的标签"]}])
+async def test_invalid_recommendation_intent_uses_rule_search(api, monkeypatch, unusable):
+    client, _teacher_token, student_token = api
+    monkeypatch.setenv("DEEPSEEK_MOCK", "false")
+
+    async def invalid(*args, **kwargs):
+        return unusable
+
+    monkeypatch.setattr(LLMClient, "chat_json", invalid)
+    response = await client.post(
+        "/api/question-bank/assistant",
+        json={"message": "推荐3道样本空间基础题", "mode": "recommend"},
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["model"] == "question-bank-retrieval"
+    assert len(result["sources"]) == 3
+    assert all("样本空间" in source["keypoint"] for source in result["sources"])
 
 
 async def test_tutor_follow_up_selects_source_and_new_topic_does_not_carry(api, monkeypatch):
@@ -614,6 +687,80 @@ async def test_tutor_follow_up_selects_source_and_new_topic_does_not_carry(api, 
     assert all("正态分布" in source["keypoint"] for source in new_topic.json()["sources"])
 
 
+@pytest.mark.parametrize("endpoint", ["assistant", "assistant/stream"])
+@pytest.mark.parametrize(
+    "message, model_answer",
+    [
+        ("Tweedie 指数离散族在纯保费建模中怎么理解？", "可以把赔案次数和赔案金额分开理解。"),
+        ("请讲解 P999999", "题库里没有这个题号。请贴出完整题干。"),
+    ],
+)
+async def test_tutor_uses_general_model_without_sources(api, monkeypatch, endpoint, message, model_answer):
+    client, _teacher_token, student_token = api
+    headers = {"Authorization": f"Bearer {student_token}"}
+    monkeypatch.setenv("DEEPSEEK_MOCK", "false")
+    calls = []
+
+    async def chat(self, messages, *, system, thinking, **_options):
+        calls.append(self.name)
+        assert thinking is False
+        assert message in messages[-1].content
+        assert "题库资料：" not in messages[-1].content
+        assert "一般知识" in system
+        assert "请补充完整题干" in system
+        assert "不得复述最终答案" in system
+        return model_answer
+
+    async def stream(self, messages, **options):
+        yield await chat(self, messages, **options)
+
+    monkeypatch.setattr(LLMClient, "chat", chat)
+    monkeypatch.setattr(LLMClient, "stream_chat", stream)
+    response = await client.post(
+        f"/api/question-bank/{endpoint}",
+        json={"message": message, "guidance_mode": "step"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    if endpoint.endswith("/stream"):
+        events = [json.loads(line) for line in response.text.splitlines()]
+        assert [item["event"] for item in events] == ["meta", "delta", "done"]
+        assert events[1]["data"] == model_answer
+        meta = events[0]["data"]
+        model = events[-1]["data"]["model"]
+    else:
+        meta = response.json()
+        model = meta["model"]
+        assert meta["answer"] == model_answer
+    assert meta["sources"] == []
+    assert model == f"llm-general:{LLMClient().model}"
+    assert calls == ["question_bank_tutor_general"]
+    saved = await client.get(f"/api/question-bank/sessions/{meta['session_id']}/messages", headers=headers)
+    assert saved.json()["messages"][-1]["model"] == model
+
+
+@pytest.mark.parametrize("endpoint", ["assistant", "assistant/stream"])
+async def test_tutor_without_model_or_sources_explains_unavailability(api, monkeypatch, endpoint):
+    client, _teacher_token, student_token = api
+
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("offline test")
+
+    async def empty_stream(*args, **kwargs):
+        yield ""
+
+    monkeypatch.setattr(LLMClient, "chat", unavailable)
+    monkeypatch.setattr(LLMClient, "stream_chat", empty_stream)
+    response = await client.post(
+        f"/api/question-bank/{endpoint}",
+        json={"message": "Tweedie 指数离散族在纯保费建模中怎么理解？"},
+        headers={"Authorization": f"Bearer {student_token}"},
+    )
+    assert response.status_code == 200
+    assert "模型服务也未能完成回答" in response.text
+    assert "llm-unavailable" in response.text
+
+
 async def test_stream_interruption_does_not_append_standard_solution(api, monkeypatch):
     client, _teacher_token, student_token = api
     headers = {"Authorization": f"Bearer {student_token}"}
@@ -635,6 +782,7 @@ async def test_stream_interruption_does_not_append_standard_solution(api, monkey
     assert response.status_code == 200
     events = [json.loads(line) for line in response.text.splitlines()]
     answer = "".join(event["data"] for event in events if event["event"] == "delta")
+    assert events[-1]["data"]["model"] == "llm-interrupted"
     assert "先识别事件" in answer
     assert "模型连接中断" in answer
     assert "标准解析" not in answer

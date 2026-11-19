@@ -5,6 +5,8 @@
 ## 当前能力
 
 - 学生端：四种辅导方式、流式答疑、多方式作答诊断、知识点掌握度、认知断层预警和个性化学习路径
+- 题目推荐由配置的 DeepSeek 模型识别练习需求，然后按知识点、难度和题型从题库筛选。模型不可用时使用本地规则检索。
+- 讲解答疑优先使用题库及有权检索的课程资料。找不到匹配资料时，由配置的 DeepSeek 进行通用讲解并标明来源。模型不可用时，页面会显示已有资料或说明暂时无法回答。
 - 手写识别：JPG、PNG、WebP 作答图片通过 MinerU Cloud OCR 提取文字与 LaTeX 公式，识别结果和原图一并留存并参与诊断
 - 教学闭环：教师创建班级并发布短诊断，学生使用班级码加入和完成任务；系统按班级证据生成知识点风险、动态干预分组和无提示迁移验证
 - 探究实验：提供大数定律、概率分布、极限定理、贝叶斯、置信区间与蒙特卡洛等 8 个参数化实验，并关联题库练习
@@ -20,26 +22,41 @@
 
 分层教学包由可审计的课程规则引擎生成，不依赖模型 API Key。引擎会保证课堂时间闭合、题目可追溯、教师答案与学生版本分离，并为每层写明适用证据、达标标准和升级条件；关联班级时，仅使用该班级与所选题目直接相关的任务作答。
 
+## 公司接手需要准备什么
+
+GitHub 源码包包含前后端、数据库迁移、部署模板、2000 道题、54 张配图和 4 份公共课程资料。公司解压后按下表配置自己的运行环境。真实密钥统一放在公司服务器的 `backend/.env` 或容器密钥配置中。老师自行上传的资料、账号和班级记录来自各自部署的数据库，已有业务数据单独备份交付。
+
+| 需要使用的功能 | 公司需要准备 | 当前本地开发环境 |
+| --- | --- | --- |
+| 登录、内置题库、班级任务、教学包和实验 | 正式运行使用 PostgreSQL 17、随机 `SECRET_KEY` 和一个初始教师账号。Docker Compose 会启动数据库 | 前后端在本机运行，SQLite 保存数据，开发教师入口已启用 |
+| 真实 AI 讲解、无资料时的通用讲解、推荐意图识别和开放题诊断 | 公司自己的 `DEEPSEEK_API_KEY`，以及访问配置的 DeepSeek API 的网络。默认模型为 `deepseek-v4-pro` | 已配真实 DeepSeek，`DEEPSEEK_MOCK=false` |
+| 手写作答的自动文字和公式识别 | 可选。公司的 `MINERU_TOKEN` 和访问 MinerU 的网络。留空时仍可保存图片，由教师复核 | 已配置 MinerU Token |
+| 教师上传资料并在问答中检索 | 可选。小规模可选 `local` 并运行 Ollama 与 `bge-m3`。也可选 `ragflow`，由公司提供 RAGFlow 地址、API Key 和可用的向量模型 | 采用 `local`，本机 Ollama 运行 `bge-m3` |
+
+**RAGFlow 和 Ollama 都可以按需启用。** 只需内置题库、班级功能和 DeepSeek 答疑时，保留 `KNOWLEDGE_BACKEND=disabled` 即可。开启课程资料功能时，从 `local` 和 `ragflow` 选一个。当前本地使用 Ollama，RAGFlow 已接入代码，可在公司具备该服务后启用。GitHub Pages 供演示，企业业务使用部署后的应用。
+
 ## 环境要求
 
-- Python 3.12
-- Node.js 22
-- 本地开发无需单独安装数据库
-- PostgreSQL 17（正式环境）
-- Docker 与 Docker Compose（可选，用于一键模拟正式部署）
-- Ollama + `bge-m3`（本地知识库演示）
-- RAGFlow（可选；企业规模知识库单独部署）
+- Docker 部署使用 Docker Engine 与 Compose v2，镜像内提供 Python 3.12、Node.js 22 和 PostgreSQL 17。
+- 从源代码直接运行时自行安装 Python 3.12 和 Node.js 22。本地开发默认使用 SQLite。
 
 ## 本地开发（SQLite）
 
-后端：
+在 macOS 或 Linux 启动后端：
 
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+python -m pip install -r requirements.txt
+test -f .env || cp .env.example .env
+```
+
+首次本地体验，在 `backend/.env` 设置 `APP_HOST=127.0.0.1` 与 `DEV_LOGIN_ENABLED=true`。需要真实答疑时再填入自己的 `DEEPSEEK_API_KEY`。保留模板的 `KNOWLEDGE_BACKEND=disabled` 可先验证基础功能。
+
+在同一个后端终端启动服务：
+
+```bash
 python run.py
 ```
 
@@ -51,9 +68,9 @@ npm ci
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173`。SQLite 数据默认写入 `backend/teaching_assistant.db`，适合开发和测试。
+浏览器访问 `http://localhost:5173`，可点击「一键进入本地教师端」。SQLite 数据默认写入 `backend/teaching_assistant.db`。
 
-启动本地知识库前安装并运行 Embedding 模型：
+如果要启用教师资料检索，在 `backend/.env` 改为 `KNOWLEDGE_BACKEND=local`，然后安装并运行 Ollama 与 Embedding 模型：
 
 ```bash
 brew install ollama
@@ -69,16 +86,16 @@ ollama pull bge-m3
 
 仓库包含 `.github/workflows/pages.yml`，可将 React 前端部署到 GitHub Pages。Pages 构建会启用浏览器内模拟 API，访客无需账号即可分别进入教师端和学生端，浏览题库、任务、学习路径、班级雷达、教学包和预设答疑效果。演示操作仅保存在访客自己的浏览器中，不会写入真实数据库或调用模型服务；真实登录、多人共享数据和 AI 答疑仍需部署后端。
 
-## PostgreSQL / Docker 部署验证
+## PostgreSQL / Docker 部署
 
 这套方式会构建前端、运行 Alembic 数据库迁移并启动 PostgreSQL 与后端。企业的真实服务器、域名和密钥不应写入源代码。
 
-1. 安装 Docker Desktop。
+1. 安装 Docker Engine 与 Compose v2，桌面验收也可用 Docker Desktop。构建环境需能下载容器镜像及 Python、npm 依赖。
 2. 创建配置文件：
 
 ```bash
 cd backend
-cp .env.example .env
+test -f .env || cp .env.example .env
 ```
 
 3. 至少修改以下配置：
@@ -88,18 +105,26 @@ SECRET_KEY=至少32个字符的随机密钥
 POSTGRES_PASSWORD=数据库强密码
 BOOTSTRAP_TEACHER_USERNAME=admin
 BOOTSTRAP_TEACHER_PASSWORD=至少12位的初始教师密码
+DEV_LOGIN_ENABLED=false
+ALLOWED_ORIGINS=
+KNOWLEDGE_BACKEND=disabled
 ```
+
+公司需要真实模型能力时填入自己的 `DEEPSEEK_API_KEY`，保留 `DEEPSEEK_MOCK=false`。需要自动手写识别时另填 `MINERU_TOKEN`。需要检索教师资料时选定资料后端并配置其地址。应用在容器内运行时，资料后端的地址须从容器可访问。本机起的 Ollama 或 RAGFlow 可在 Docker Desktop 上使用 `host.docker.internal`，Linux 可填写同一容器网络中的服务名或公司私网地址。
 
 4. 构建并启动：
 
 ```bash
 docker compose up --build -d
 docker compose ps
+curl --fail http://localhost:8101/health/ready
 ```
 
 在本机访问 `http://localhost:8101` 验证启动。企业环境通过同域 HTTPS 入口访问，登录 Cookie 使用 `Secure`。Docker 配置中的数据库密码填原值，含美元符号时用单引号包住整个值。直接连接外部 PostgreSQL 时，按下方示例为数据库连接地址中的密码做 URL 编码。
 
 首次启动会执行 `alembic upgrade head`，并在配置了初始教师账号时创建该账号。该账号首次登录会被强制修改初始密码，改密后其他旧会话立即失效。重复启动会复用已有账号。
+
+用教师账号登录后，打开「题库」搜索 `P002000`，验证内置题库。已配置 DeepSeek 时，在「答疑」提问并检查回答来源是否显示模型名称。启用了教师资料功能时，用示例讲义验证上传、解析、班级绑定和学生问答引用。数据库就绪检查仅确认主系统能连接数据库。
 
 查看日志或停止服务：
 
@@ -125,7 +150,9 @@ docker compose down
 | `POSTGRES_PASSWORD` | Docker PostgreSQL 密码；用于连接地址时特殊字符需 URL 编码 |
 | `BOOTSTRAP_TEACHER_*` | 可选的首个教师账号，只在账号不存在时创建 |
 | `TEACHER_REGISTRATION_CODE` | 可选；教师自行注册时必须提供的邀请代码 |
-| `DEEPSEEK_API_KEY` | 部署方提供的模型 API Key |
+| `DEEPSEEK_API_KEY` | 真实 AI 功能所需的公司密钥。留空时内置题库和规则推荐可用 |
+| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | 生成模型的地址和名称，模板默认指向 DeepSeek |
+| `DEEPSEEK_MOCK` | 离线测试开关，真实部署设为 `false` |
 | `DEEPSEEK_TIMEOUT_SECONDS` | 模型请求超时秒数，默认 60 |
 | `DEEPSEEK_MAX_RETRIES` | 模型请求最大重试次数，默认 2、最大 5 |
 | `MINERU_TOKEN` | MinerU Cloud OCR Token；未配置时图片仍保存，但不会自动识别 |
@@ -133,7 +160,7 @@ docker compose down
 | `MINERU_MODEL` | 图片解析模型，默认 `vlm`，也可配置 `pipeline` |
 | `MINERU_TIMEOUT_SECONDS` | 单张图片识别等待上限，默认 120 秒 |
 | `MINERU_USE_ENV_PROXY` | 是否读取系统代理变量，默认 `false` |
-| `KNOWLEDGE_BACKEND` | `local` 用于作品演示，`ragflow` 用于企业部署，`disabled` 关闭课程资料检索 |
+| `KNOWLEDGE_BACKEND` | 可选资料检索。默认 `disabled`。`local` 对接 Ollama，`ragflow` 对接公司的 RAGFlow |
 | `LOCAL_EMBEDDING_BASE_URL` | Ollama 地址，本机默认 `http://localhost:11434` |
 | `LOCAL_EMBEDDING_MODEL` | 本地真实 Embedding 模型，默认 `bge-m3` |
 | `LOCAL_CHUNK_SIZE` / `LOCAL_CHUNK_OVERLAP` | 本地文本块大小与重叠字符数，默认 900/120 |

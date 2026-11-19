@@ -261,9 +261,17 @@ async def test_tutor_respects_active_assignment_and_guidance_policy(api, monkeyp
         events = [json.loads(line) for line in pending.text.splitlines()]
         assert "提交作答" in next(event["data"] for event in events if event["event"] == "delta")
         assert events[0]["data"]["sources"] == []
+        session_id = events[0]["data"]["session_id"]
     else:
         assert "提交作答" in pending.json()["answer"]
         assert pending.json()["sources"] == []
+        session_id = pending.json()["session_id"]
+    assert not calls
+    for message in ("再讲一下", "还是不懂，继续"):
+        follow_up = await client.post(path, json={
+            "session_id": session_id, "message": message, "guidance_mode": "full",
+        }, headers=headers)
+        assert "提交作答" in follow_up.text and "assignment-policy" in follow_up.text
     assert not calls
 
     attempt = await client.post("/api/question-bank/questions/P000001/attempts", json={

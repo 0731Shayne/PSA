@@ -18,7 +18,8 @@ def _mock_sdk(monkeypatch, handler):
     return http_client
 
 
-async def test_stop_stream_closes_provider_response(monkeypatch):
+@pytest.mark.parametrize("thinking", [True, False])
+async def test_stop_stream_closes_provider_response(monkeypatch, thinking):
     class ProviderStream(httpx.AsyncByteStream):
         closed = False
 
@@ -34,11 +35,14 @@ async def test_stop_stream_closes_provider_response(monkeypatch):
 
     def handler(request):
         assert request.url.path == "/chat/completions"
-        assert json.loads(request.content)["stream"] is True
+        payload = json.loads(request.content)
+        assert payload["stream"] is True
+        assert payload["thinking"]["type"] == ("enabled" if thinking else "disabled")
+        assert ("reasoning_effort" in payload) is thinking
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
 
     http_client = _mock_sdk(monkeypatch, handler)
-    async with aclosing(LLMClient().stream_chat([ChatMessage("user", "题目")])) as answer:
+    async with aclosing(LLMClient().stream_chat([ChatMessage("user", "题目")], thinking=thinking)) as answer:
         assert await anext(answer) == "第一步"
     assert stream.closed and http_client.is_closed
 

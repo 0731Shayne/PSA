@@ -1,6 +1,6 @@
 """Unified DeepSeek client built on the OpenAI Python SDK.
 
-All production LLM calls use the same endpoint/model/reasoning configuration.
+Production LLM calls share the configured endpoint and model.
 The small mock path exists only for offline tests and never uses a second model.
 """
 from __future__ import annotations
@@ -64,6 +64,7 @@ class LLMClient:
         max_tokens: int = 32768,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | None = None,
+        thinking: bool = True,
         **kwargs: Any,
     ):
         """Return the raw OpenAI-SDK response; always uses non-streaming mode."""
@@ -74,16 +75,17 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
-            "extra_body": {"thinking": {"type": "enabled"}},
+            "extra_body": {"thinking": {"type": "enabled" if thinking else "disabled"}},
             "max_tokens": max_tokens,
         }
+        if thinking:
+            params["reasoning_effort"] = DEEPSEEK_REASONING_EFFORT
         if tools:
             params["tools"] = tools
         if tool_choice:
             params["tool_choice"] = tool_choice
         # Allow safe OpenAI-compatible options without overriding the fixed
-        # model, endpoint, reasoning mode or non-streaming contract.
+        # model, endpoint or non-streaming contract.
         for key in ("temperature", "top_p", "stop", "response_format"):
             if key in kwargs:
                 params[key] = kwargs[key]
@@ -113,6 +115,8 @@ class LLMClient:
         messages: list[ChatMessage],
         system: str | None = None,
         max_tokens: int = 32768,
+        *,
+        thinking: bool = True,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Yield answer text as it arrives from the model."""
@@ -128,10 +132,11 @@ class LLMClient:
             "model": self.model,
             "messages": payload,
             "stream": True,
-            "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
-            "extra_body": {"thinking": {"type": "enabled"}},
+            "extra_body": {"thinking": {"type": "enabled" if thinking else "disabled"}},
             "max_tokens": max_tokens,
         }
+        if thinking:
+            params["reasoning_effort"] = DEEPSEEK_REASONING_EFFORT
         for key in ("temperature", "top_p", "stop"):
             if key in kwargs:
                 params[key] = kwargs[key]
