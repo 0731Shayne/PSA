@@ -707,6 +707,7 @@ body { background-image: none; }
 .brand-subtitle { margin-top: 1px; color: #98a2b3; font-size: .57rem; font-weight: 700; letter-spacing: .11em; }
 
 .topbar-menu {
+  --topbar-item-padding: 20px;
   display: none;
   min-width: 0;
   flex: 1;
@@ -718,16 +719,16 @@ body { background-image: none; }
 .topbar-menu.ant-menu-horizontal > .ant-menu-item {
   top: 0;
   height: 72px;
-  margin-inline: 2px;
-  padding-inline: 13px;
+  margin-inline: 3px;
+  padding-inline: var(--topbar-item-padding);
   color: #475467;
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 650;
   line-height: 72px;
 }
 .topbar-menu.ant-menu-horizontal > .ant-menu-item:hover { color: var(--forest) !important; }
 .topbar-menu.ant-menu-horizontal > .ant-menu-item-selected { color: var(--forest) !important; }
-.topbar-menu.ant-menu-horizontal > .ant-menu-item::after { right: 13px; bottom: 0; left: 13px; border-bottom-width: 2px; }
+.topbar-menu.ant-menu-horizontal > .ant-menu-item::after { inset-inline: var(--topbar-item-padding); bottom: 0; border-bottom-width: 2px; }
 
 .topbar-actions { display: flex; flex: none; align-items: center; gap: 8px; }
 .topbar-menu-trigger { display: inline-flex !important; }
@@ -960,8 +961,8 @@ body { background-image: none; }
 @media (max-width: 1120px) and (min-width: 1024px) {
   .app-topbar-inner { gap: 12px; padding-inline: 18px; }
   .app-brand-wrap { width: 204px; }
-  .topbar-menu.ant-menu-horizontal > .ant-menu-item { padding-inline: 9px; }
-  .topbar-menu.ant-menu-horizontal > .ant-menu-item::after { right: 9px; left: 9px; }
+  .topbar-menu { --topbar-item-padding: 12px; }
+  .topbar-menu.ant-menu-horizontal > .ant-menu-item { font-size: 16px; }
   .account-role { display: none; }
 }
 
