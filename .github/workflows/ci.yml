@@ -117,7 +117,9 @@ jobs:
       SECRET_KEY: ci-only-secret-key-with-at-least-32-characters
       POSTGRES_DB: mra_ci
       POSTGRES_USER: mra
-      POSTGRES_PASSWORD: ci-database-password
+      POSTGRES_PASSWORD: 'ci@database:%password'
+      BOOTSTRAP_TEACHER_USERNAME: ci-teacher
+      BOOTSTRAP_TEACHER_PASSWORD: ci-only-initial-teacher-password
       DEEPSEEK_MOCK: "true"
     steps:
       - uses: actions/checkout@v7
@@ -132,6 +134,52 @@ jobs:
             sleep 2
           done
           exit 1
+      - name: Verify teacher onboarding and protected question bank
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from http.cookies import SimpleCookie
+          from urllib.error import HTTPError
+          from urllib.request import Request, urlopen
+
+          def request(path, *, payload=None, token=None, expected=200):
+              data = None if payload is None else json.dumps(payload).encode()
+              headers = {"Content-Type": "application/json"}
+              if token:
+                  headers["Cookie"] = f"mra_session={token}"
+              request = Request("http://127.0.0.1:8101" + path, data=data, headers=headers)
+              try:
+                  response = urlopen(request, timeout=15)
+              except HTTPError as exc:
+                  response = exc
+              with response:
+                  assert response.status == expected, (path, response.status, expected)
+                  return json.load(response), SimpleCookie(response.headers.get("Set-Cookie", ""))
+
+          username = os.environ["BOOTSTRAP_TEACHER_USERNAME"]
+          password = os.environ["BOOTSTRAP_TEACHER_PASSWORD"]
+          user, cookies = request("/api/auth/login", payload={"username": username, "password": password})
+          assert user["user"]["role"] == "teacher" and user["user"]["must_change_password"]
+          initial = cookies["mra_session"]
+          assert initial["secure"] and initial["httponly"] and initial["samesite"].lower() == "lax"
+          request("/api/question-bank/stats", token=initial.value, expected=403)
+          _, cookies = request("/api/auth/change-password", payload={
+              "current_password": password, "new_password": "ci-only-changed-teacher-password",
+          }, token=initial.value)
+          request("/api/auth/me", token=initial.value, expected=401)
+          stats, _ = request("/api/question-bank/stats", token=cookies["mra_session"].value)
+          assert stats["total"] == 2_000
+          status, _ = request("/api/auth/dev-login/status")
+          assert status["enabled"] is False
+          PY
+      - name: Restore a backup to an isolated database
+        run: |
+          docker compose -f backend/docker-compose.yml exec -T db pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$RUNNER_TEMP/psa.backup"
+          docker compose -f backend/docker-compose.yml exec -T db createdb -U "$POSTGRES_USER" psa_restore_check
+          docker compose -f backend/docker-compose.yml exec -T db pg_restore --exit-on-error -U "$POSTGRES_USER" -d psa_restore_check < "$RUNNER_TEMP/psa.backup"
+          restored=$(docker compose -f backend/docker-compose.yml exec -T db psql -U "$POSTGRES_USER" -d psa_restore_check -Atc "SELECT count(*) FROM users WHERE role = 'teacher' AND NOT must_change_password")
+          test "$restored" = "1"
       - name: Show application logs on failure
         if: failure()
         run: docker compose -f backend/docker-compose.yml logs app

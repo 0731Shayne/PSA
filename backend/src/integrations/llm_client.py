@@ -29,7 +29,7 @@ class ChatMessage:
 
 
 class LLMClient:
-    """Async facade over the synchronous ``openai.OpenAI`` DeepSeek client."""
+    """DeepSeek client with cancellation propagated to the HTTP transport."""
 
     def __init__(self, step: int | None = None, name: str | None = None) -> None:
         self.step = step
@@ -40,7 +40,7 @@ class LLMClient:
         self.provider = "mock" if self.mock else "deepseek"
 
     def _client(self):
-        from openai import DefaultHttpxClient, OpenAI
+        from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
@@ -48,8 +48,8 @@ class LLMClient:
         # Do not inherit stale system proxy variables by default. This keeps the
         # teaching assistant available when a local proxy/VPN is switched off.
         # Deployments that intentionally rely on environment proxies can opt in.
-        http_client = DefaultHttpxClient(trust_env=DEEPSEEK_USE_ENV_PROXY)
-        return OpenAI(
+        http_client = DefaultAsyncHttpxClient(trust_env=DEEPSEEK_USE_ENV_PROXY)
+        return AsyncOpenAI(
             api_key=api_key,
             base_url=DEEPSEEK_BASE_URL,
             http_client=http_client,
@@ -70,28 +70,26 @@ class LLMClient:
         if self.mock:
             raise RuntimeError("Raw responses are unavailable in DeepSeek mock mode")
 
-        def _call():
-            client = self._client()
-            params: dict[str, Any] = {
-                "model": self.model,
-                "messages": messages,
-                "stream": False,
-                "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
-                "extra_body": {"thinking": {"type": "enabled"}},
-                "max_tokens": max_tokens,
-            }
-            if tools:
-                params["tools"] = tools
-            if tool_choice:
-                params["tool_choice"] = tool_choice
-            # Allow safe OpenAI-compatible options without overriding the fixed
-            # model, endpoint, reasoning mode or non-streaming contract.
-            for key in ("temperature", "top_p", "stop", "response_format"):
-                if key in kwargs:
-                    params[key] = kwargs[key]
-            return client.chat.completions.create(**params)
-
-        return await asyncio.to_thread(_call)
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
+            "extra_body": {"thinking": {"type": "enabled"}},
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            params["tools"] = tools
+        if tool_choice:
+            params["tool_choice"] = tool_choice
+        # Allow safe OpenAI-compatible options without overriding the fixed
+        # model, endpoint, reasoning mode or non-streaming contract.
+        for key in ("temperature", "top_p", "stop", "response_format"):
+            if key in kwargs:
+                params[key] = kwargs[key]
+        async with self._client() as client:
+            async with asyncio.timeout(DEEPSEEK_TIMEOUT_SECONDS):
+                return await client.chat.completions.create(**params)
 
     async def chat(
         self,
@@ -126,45 +124,29 @@ class LLMClient:
         if system:
             payload.append({"role": "system", "content": system})
         payload.extend({"role": m.role, "content": m.content} for m in messages if m.role != "system")
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[str | BaseException | None] = asyncio.Queue()
-
-        def _produce() -> None:
-            try:
-                params: dict[str, Any] = {
-                    "model": self.model,
-                    "messages": payload,
-                    "stream": True,
-                    "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
-                    "extra_body": {"thinking": {"type": "enabled"}},
-                    "max_tokens": max_tokens,
-                }
-                for key in ("temperature", "top_p", "stop"):
-                    if key in kwargs:
-                        params[key] = kwargs[key]
-                response = self._client().chat.completions.create(**params)
-                for chunk in response:
-                    if not chunk.choices:
-                        continue
-                    content = chunk.choices[0].delta.content
-                    if content:
-                        loop.call_soon_threadsafe(queue.put_nowait, content)
-            except BaseException as exc:  # forwarded to the async consumer
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
-
-        task = asyncio.create_task(asyncio.to_thread(_produce))
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                if isinstance(item, BaseException):
-                    raise item
-                yield item
-        finally:
-            await task
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": payload,
+            "stream": True,
+            "reasoning_effort": DEEPSEEK_REASONING_EFFORT,
+            "extra_body": {"thinking": {"type": "enabled"}},
+            "max_tokens": max_tokens,
+        }
+        for key in ("temperature", "top_p", "stop"):
+            if key in kwargs:
+                params[key] = kwargs[key]
+        deadline = asyncio.get_running_loop().time() + DEEPSEEK_TIMEOUT_SECONDS
+        async with self._client() as client:
+            async with asyncio.timeout_at(deadline):
+                response = await client.chat.completions.create(**params)
+            async with response:
+                while True:
+                    async with asyncio.timeout_at(deadline):
+                        chunk = await anext(response, None)
+                    if chunk is None:
+                        break
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
 
     async def chat_json(
         self,

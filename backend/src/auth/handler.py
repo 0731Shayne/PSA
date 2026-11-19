@@ -174,7 +174,13 @@ async def register(payload: RegisterRequest, response: Response, db: AsyncSessio
         raise HTTPException(status_code=409, detail="用户名已存在")
     user = User(username=username, name=name, password_hash=hash_password(password), role=role)
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        if await db.scalar(select(User.id).where(User.username == username)) is not None:
+            raise HTTPException(status_code=409, detail="用户名已存在")
+        raise
     await db.refresh(user)
     token = create_token(user.id, user.session_version)
     _set_session_cookie(response, token)

@@ -46,5 +46,5 @@ test("desktop teacher workspace exposes delivery actions", async ({ page }, test
   expect(await page.locator("main main").count()).toBe(0);
   await page.goto("/classrooms");
   await expect(page.getByRole("heading", { name: "班级认知雷达" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "创建班级", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /创建班级$/ }).first()).toBeVisible();
 });

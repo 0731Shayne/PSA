@@ -6,7 +6,11 @@
 **/.pytest_cache
 **/.venv
 **/node_modules
-backend/.env
-backend/*.db
+**/.env
+**/.env.*
+**/*.db
+**/*.sqlite3
+**/*.backup
+**/*.dump
 backend/static
 web/dist

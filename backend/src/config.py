@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL
 
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -14,9 +15,26 @@ load_dotenv(BACKEND_DIR / ".env")
 
 APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "sqlite+aiosqlite:///./teaching_assistant.db"
-).strip()
+
+
+def _database_url() -> str:
+    explicit_url = os.environ.get("DATABASE_URL", "").strip()
+    if explicit_url:
+        return explicit_url
+    compose_host = os.environ.get("PSA_POSTGRES_HOST")
+    if compose_host:
+        return URL.create(
+            "postgresql+asyncpg",
+            username=os.environ["POSTGRES_USER"],
+            password=os.environ["POSTGRES_PASSWORD"],
+            host=compose_host,
+            port=5432,
+            database=os.environ["POSTGRES_DB"],
+        ).render_as_string(hide_password=False)
+    return "sqlite+aiosqlite:///./teaching_assistant.db"
+
+
+DATABASE_URL = _database_url()
 _configured_secret = os.environ.get("SECRET_KEY", "dev-secret-change-me-please")
 # Development may inherit an old short local secret. Derive a stable 32-byte
 # value to avoid weak-key warnings without weakening production validation.

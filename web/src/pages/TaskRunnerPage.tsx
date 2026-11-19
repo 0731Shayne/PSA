@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Input, Progress, Radio, Segmented, Skeleton, Tag, Upload, message } from "antd";
+import { Alert, Button, Empty, Input, Progress, Segmented, Skeleton, Tag, Upload, message } from "antd";
 import type { UploadFile } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, BulbOutlined, CameraOutlined, CheckCircleOutlined, EyeOutlined, SendOutlined } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { MathMarkdown } from "@/components/MathMarkdown";
+import { isObjectiveQuestion, ObjectiveQuestionInput } from "@/components/ObjectiveQuestionInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { confirmUnsavedNavigation, setUnsavedChanges } from "@/utils/unsavedChanges";
 import { isDemoMode } from "@/demo/demoApi";
@@ -93,6 +94,7 @@ export default function TaskRunnerPage() {
   const [historyError, setHistoryError] = useState(false);
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const inFlight = useRef(false);
+  const questionRevision = useRef(0);
 
   useEffect(() => {
     if (!Number.isInteger(assignmentId) || assignmentId <= 0) { setLoadError(true); setLoading(false); return; }
@@ -114,12 +116,13 @@ export default function TaskRunnerPage() {
     return () => { active = false; };
   }, [assignmentId]);
 
-  const currentId = assignment?.question_ids[index];
+  const currentId = assignment?.id === assignmentId ? assignment.question_ids[index] : undefined;
   const draftKey = `psa:answer:${user?.id}:${assignmentId}:${currentId}`;
   useEffect(() => {
     if (!currentId) { setQuestion(null); return; }
     let active = true;
     setDraftReady(""); setDetailLoading(true); setDetailError(false); setHistoryError(false);
+    setHintLoading(false); setRevealing(false);
     let draft: {answer?:string; reasoning?:string; imageDataUrl?:string; inputMode?:string; file?:UploadFile; diagnostic?:Diagnostic; submission?:{fingerprint:string;key:string}} = {};
     try { draft=JSON.parse(sessionStorage.getItem(draftKey) || "{}"); setDraftError(false); } catch { setDraftError(true); }
     setAnswer(draft.answer || "");setReasoning(draft.reasoning || "");setImageDataUrl(draft.imageDataUrl || "");setFile(draft.file || null);
@@ -143,7 +146,7 @@ export default function TaskRunnerPage() {
           setAnswer(saved.answer || "");setReasoning(saved.reasoning || "");setImageDataUrl(saved.image_data_url || "");setInputMode(saved.input_mode || "formula");setFile(saved.image_name?{uid:"saved",name:saved.image_name}:null);setDiagnostic(saved);
         }
       }).catch(()=>{if(active)setHistoryError(true);});
-    return ()=>{active=false;};
+    return () => { active = false; questionRevision.current++; };
   }, [assignmentId, currentId, draftKey, detailRevision]);
 
   useEffect(()=>{
@@ -160,29 +163,33 @@ export default function TaskRunnerPage() {
     return ()=>{setUnsavedChanges(false);window.removeEventListener("beforeunload",protect);};
   },[draftError,submitting]);
   function switchQuestion(next:number) {
-    if(inFlight.current)return;
+    if(inFlight.current || next === index)return;
     if(draftError && !window.confirm("当前草稿未能保存，切换会丢失输入。确定切换吗？"))return;
+    questionRevision.current++;
     setIndex(next);
   }
 
   const completedCount = useMemo(() => assignment?.question_ids.filter(id => attempted.has(id)).length || 0, [assignment, attempted]);
   const expired = Boolean(assignment?.due_at && new Date(assignment.due_at).getTime() < Date.now());
   const hintBlocked = question?.hint_policy === "blocked" || question?.is_transfer;
+  const objective = question !== null && isObjectiveQuestion(question);
 
   async function requestHint() {
-    if (!question || hintLoading || hintBlocked) return;
+    if (!question || question.ID !== currentId || hintLoading || hintBlocked) return;
+    const revision = questionRevision.current;
     setHintLoading(true);
     try {
       const response = await apiClient.post<{ hint: string }>(`/api/question-bank/questions/${question.ID}/hint`, { answer, reasoning, assignment_id: assignmentId });
-      setHint(response.data.hint);
+      if (revision === questionRevision.current) setHint(response.data.hint);
     } catch (error: unknown) {
+      if (revision !== questionRevision.current) return;
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       message.warning(detail || "提示生成失败，请稍后重试");
-    } finally { setHintLoading(false); }
+    } finally { if (revision === questionRevision.current) setHintLoading(false); }
   }
 
   async function submitAttempt() {
-    if (!question || inFlight.current) return;
+    if (!question || question.ID !== currentId || inFlight.current) return;
     if (!answer.trim() && !reasoning.trim() && !imageDataUrl) { message.warning("请先填写答案、描述思路或上传手写过程"); return; }
     inFlight.current=true;
     setSubmitting(true);
@@ -212,16 +219,19 @@ export default function TaskRunnerPage() {
   }
 
   async function revealAnswer() {
-    if (!question || revealing) return;
+    if (!question || question.ID !== currentId || revealing) return;
+    const revision = questionRevision.current;
     setRevealing(true);
     try {
       const response = await apiClient.get<Question>(`/api/question-bank/questions/${question.ID}/answer`, { params: { assignment_id: assignmentId } });
-      setQuestion(current => current ? { ...current, ...response.data } : current);
+      if (revision !== questionRevision.current) return;
+      setQuestion(current => current?.ID === question.ID ? { ...current, ...response.data } : current);
       setShowAnswer(true);
     } catch (error: unknown) {
+      if (revision !== questionRevision.current) return;
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       message.warning(detail || "请先完成当前任务中的这道题");
-    } finally { setRevealing(false); }
+    } finally { if (revision === questionRevision.current) setRevealing(false); }
   }
 
   if (loading) return <div className="space-y-5"><Skeleton active paragraph={{ rows: 3 }} /><Skeleton active paragraph={{ rows: 9 }} /></div>;
@@ -239,17 +249,17 @@ export default function TaskRunnerPage() {
     </div>
     {draftError && <Alert className="mb-3" type="warning" showIcon message="浏览器暂时无法保存草稿，请保留输入并完成提交" />}
     {historyError && <Alert className="mb-3" type="warning" message="历史作答加载失败，当前输入仍保留" action={<Button onClick={()=>setDetailRevision(v=>v+1)}>重试历史</Button>} />}
-    {detailError ? <Alert type="error" showIcon message="题目加载失败" action={<Button onClick={()=>setDetailRevision(v=>v+1)}>重新加载题目</Button>} /> : detailLoading || !question ? <div className="border border-slate-200 bg-white p-6"><Skeleton active paragraph={{ rows: 8 }} /></div> : <div className="space-y-5">
+    {detailError ? <Alert type="error" showIcon message="题目加载失败" action={<Button onClick={()=>setDetailRevision(v=>v+1)}>重新加载题目</Button>} /> : detailLoading || !question || question.ID !== currentId ? <div className="border border-slate-200 bg-white p-6"><Skeleton active paragraph={{ rows: 8 }} /></div> : <div className="space-y-5">
       <section className="border border-slate-200 bg-white p-6 sm:p-8">
         <div className="mb-4 flex flex-wrap items-center gap-2"><Tag color="cyan">{question.ID}</Tag><Tag>{question.qtype}</Tag><Tag color={question.hard_level === "难" ? "red" : question.hard_level === "中" ? "orange" : "green"}>{question.hard_level}</Tag>{question.is_transfer && <Tag color="purple">无提示迁移验证</Tag>}</div>
         <div className="text-base leading-8 text-slate-800"><MathMarkdown>{question.question}</MathMarkdown></div>
-        {question.choices && <div className="mt-4 space-y-2">{question.choices.map(item => <div key={item} className="rounded-lg bg-slate-50 px-4 py-2"><MathMarkdown>{item}</MathMarkdown></div>)}</div>}
+        {!objective && question.choices && <div className="mt-4 space-y-2">{question.choices.map(item => <div key={item} className="rounded-lg bg-slate-50 px-4 py-2"><MathMarkdown>{item}</MathMarkdown></div>)}</div>}
       </section>
       <section className="answer-workspace border border-slate-200 bg-white p-6 sm:p-8">
-        <div className="mb-4"><h2 className="text-lg font-bold text-slate-900">提交你的作答</h2><p className="mt-1 text-sm text-slate-600">可以填写最终答案、描述思路，或上传手写过程。</p></div>
-        <Segmented block value={inputMode} onChange={value => setInputMode(String(value))} options={[{ label: "公式 / 答案", value: "formula" }, { label: "描述思路", value: "reasoning" }, { label: "手写图片", value: "image" }]} />
-        <div className="mt-5">{question.qtype === "多选题" && question.choices ? <Checkbox.Group value={answer?answer.split("，"):[]} className="!grid !gap-3" options={question.choices.map(item => ({ label: <MathMarkdown>{item}</MathMarkdown>, value: item.match(/^\(\d+\)/)?.[0] || item }))} onChange={values => setAnswer(values.join("，"))} /> : question.qtype === "判断题" ? <Radio.Group value={answer} onChange={event => setAnswer(event.target.value)} options={[{ label: "正确", value: "正确" }, { label: "错误", value: "错误" }]} /> : inputMode === "formula" ? <><div className="mb-3 flex flex-wrap gap-2">{formulaKeys.map(([label, token]) => <Button key={label} size="small" onClick={() => setAnswer(value => value + token)}>{label}</Button>)}</div><Input.TextArea aria-label="作答答案" value={answer} onChange={event => setAnswer(event.target.value)} rows={3} maxLength={2000} showCount placeholder="输入最终答案或公式，例如：\\frac{1}{2}" />{answer && <div className="mt-3 bg-slate-50 p-4 text-center"><MathMarkdown>{`$$${answer}$$`}</MathMarkdown></div>}</> : inputMode === "reasoning" ? <Input.TextArea aria-label="作答思路" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={6} maxLength={5000} showCount placeholder="描述你使用的公式、条件和关键步骤" /> : <div>{isDemoMode && <Alert className="mb-3" type="warning" showIcon message="演示版不会调用真实 OCR" />}<Upload.Dragger accept="image/jpeg,image/png,image/webp" maxCount={1} beforeUpload={upload => { if (upload.size > 2_000_000) { message.error("图片请控制在 2MB 以内"); return Upload.LIST_IGNORE; } setFile(upload); const reader = new FileReader(); reader.onload = () => setImageDataUrl(String(reader.result || "")); reader.readAsDataURL(upload); return false; }} onRemove={() => { setFile(null); setImageDataUrl(""); }} fileList={file ? [file] : []}><CameraOutlined className="text-2xl text-teal-700" /><p className="mt-2 font-semibold">上传手写过程照片</p><p className="text-sm text-slate-500">支持 JPG、PNG、WebP，2MB 以内</p></Upload.Dragger>{imageDataUrl && <img className="mt-3 max-h-72 max-w-full object-contain" src={imageDataUrl} alt="已保存的手写作答"/>}<Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="补充图片中的关键步骤或结论（推荐）" /></div>}</div>
-        {inputMode !== "reasoning" && question.qtype !== "判断题" && question.qtype !== "多选题" && <Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="可选：用自然语言描述你的解题思路" />}
+        <div className="mb-4"><h2 className="text-lg font-bold text-slate-900">提交你的作答</h2><p className="mt-1 text-sm text-slate-600">{objective ? "请选择答案，也可以补充作答思路。" : "可以填写最终答案、描述思路，或上传手写过程。"}</p></div>
+        {!objective && <Segmented block value={inputMode} onChange={value => setInputMode(String(value))} options={[{ label: "公式 / 答案", value: "formula" }, { label: "描述思路", value: "reasoning" }, { label: "手写图片", value: "image" }]} />}
+        <div className="mt-5">{objective ? <ObjectiveQuestionInput question={question} answer={answer} onChange={setAnswer} /> : inputMode === "formula" ? <><div className="mb-3 flex flex-wrap gap-2">{formulaKeys.map(([label, token]) => <Button key={label} size="small" onClick={() => setAnswer(value => value + token)}>{label}</Button>)}</div><Input.TextArea aria-label="作答答案" value={answer} onChange={event => setAnswer(event.target.value)} rows={3} maxLength={2000} showCount placeholder="输入最终答案或公式，例如：\\frac{1}{2}" />{answer && <div className="mt-3 bg-slate-50 p-4 text-center"><MathMarkdown>{`$$${answer}$$`}</MathMarkdown></div>}</> : inputMode === "reasoning" ? <Input.TextArea aria-label="作答思路" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={6} maxLength={5000} showCount placeholder="描述你使用的公式、条件和关键步骤" /> : <div>{isDemoMode && <Alert className="mb-3" type="warning" showIcon message="演示版不会调用真实 OCR" />}<Upload.Dragger accept="image/jpeg,image/png,image/webp" maxCount={1} beforeUpload={upload => { if (upload.size > 2_000_000) { message.error("图片请控制在 2MB 以内"); return Upload.LIST_IGNORE; } setFile(upload); const reader = new FileReader(); reader.onload = () => setImageDataUrl(String(reader.result || "")); reader.readAsDataURL(upload); return false; }} onRemove={() => { setFile(null); setImageDataUrl(""); }} fileList={file ? [file] : []}><CameraOutlined className="text-2xl text-teal-700" /><p className="mt-2 font-semibold">上传手写过程照片</p><p className="text-sm text-slate-500">支持 JPG、PNG、WebP，2MB 以内</p></Upload.Dragger>{imageDataUrl && <img className="mt-3 max-h-72 max-w-full object-contain" src={imageDataUrl} alt="已保存的手写作答"/>}<Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="补充图片中的关键步骤或结论（推荐）" /></div>}</div>
+        {(objective || inputMode === "formula") && <Input.TextArea className="mt-3" value={reasoning} onChange={event => setReasoning(event.target.value)} rows={3} placeholder="可选：用自然语言描述你的解题思路" />}
         {draftReady === draftKey && !draftError && <p className="mt-3 text-sm text-slate-500" role="status">草稿已保存在当前浏览器标签页，切题或刷新后可恢复</p>}{submitting && <p className="mt-3 text-sm" role="status">正在保存与检查作答，请稍候；重试不会产生重复记录。</p>}{hintBlocked && <Alert className="mt-4" type="info" showIcon message="本题不提供提示" description="仅首次、未受辅助的新题作答可用于独立验证；看过解析后再次答对会记为订正。" />}
         {hint && <Alert className="mt-4" type="info" showIcon message="启发提示" description={<MathMarkdown>{hint}</MathMarkdown>} />}
         {diagnostic && <Alert className="mt-4" type={diagnostic.verdict === "correct" ? "success" : diagnostic.verdict === "incorrect" ? "error" : "warning"} showIcon message={diagnostic.verdict === "correct" ? `第 ${diagnostic.attempt_no} 次作答正确` : `第 ${diagnostic.attempt_no} 次作答${diagnostic.verdict === "needs_review" ? "已保存 · 待复核" : "诊断"}`} description={<div><MathMarkdown>{diagnostic.feedback}</MathMarkdown>{diagnostic.verdict === "needs_review" && <p className="mt-2">暂未得到可靠判断，不计入掌握度或风险预警。</p>}{diagnostic.error_type && <Tag className="mt-2" color="orange">{diagnostic.error_type}</Tag>}{diagnostic.submitted_late && <Tag className="mt-2" color="red">截止后提交</Tag>}</div>} />}

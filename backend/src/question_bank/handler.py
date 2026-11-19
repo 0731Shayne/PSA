@@ -4,6 +4,7 @@ import json
 import asyncio
 import hashlib
 import re
+from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -16,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
 
 from ..auth.handler import get_current_user
+from ..classroom.deadlines import deadline_utc
 from ..db.models import ChatMessage as StoredChatMessage
 from ..db.models import (
     AssignmentItem,
@@ -53,7 +55,7 @@ from .service import (
 from .teaching_package import LEARNER_PROFILES, LESSON_TYPES, build_teaching_package
 
 
-from .grading import compare_answers, GRADING_VERSION
+from .grading import compare_question_answers, GRADING_VERSION
 
 router = APIRouter()
 
@@ -190,14 +192,58 @@ async def _student_assignment_context(
     return assignment, recipient, item
 
 
-def _context_text(rows: list[dict[str, Any]]) -> str:
-    return "\n\n".join(
-        f"【{row['ID']}｜{row.get('qtype')}｜{row.get('hard_level')}】\n"
-        f"题目：{row.get('question')}\n选项：{row.get('choices')}\n"
-        f"参考答案：{row.get('answer')}\n解析：{row.get('explanation')}\n"
-        f"知识点：{'、'.join(row.get('keypoint') or [])}"
-        for row in rows
-    )
+def _context_text(rows: list[dict[str, Any]], *, include_answers: bool) -> str:
+    blocks = []
+    for row in rows:
+        block = (
+            f"【{row['ID']}｜{row.get('qtype')}｜{row.get('hard_level')}】\n"
+            f"题目：{row.get('question')}\n选项：{row.get('choices')}\n"
+            f"知识点：{'、'.join(row.get('keypoint') or [])}"
+        )
+        if include_answers:
+            block += f"\n参考答案：{row.get('answer')}\n解析：{row.get('explanation')}"
+        blocks.append(block)
+    return "\n\n".join(blocks)
+
+
+async def _tutor_assignment_sources(
+    db: AsyncSession,
+    user: User,
+    rows: list[dict[str, Any]],
+    requested_ids: list[str],
+    guidance_mode: str,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if _is_teacher(user) or not rows:
+        return rows, None
+    attempted = select(QuestionAttempt.id).where(
+        QuestionAttempt.assignment_id == LearningAssignment.id,
+        QuestionAttempt.user_id == user.id,
+        func.upper(QuestionAttempt.question_id) == AssignmentItem.question_id,
+    ).exists()
+    assigned = (await db.execute(
+        select(AssignmentItem.question_id, LearningAssignment.hint_policy, LearningAssignment.transfer_question_id)
+        .select_from(AssignmentItem)
+        .join(LearningAssignment, LearningAssignment.id == AssignmentItem.assignment_id)
+        .join(AssignmentRecipient, AssignmentRecipient.assignment_id == LearningAssignment.id)
+        .where(
+            AssignmentRecipient.student_id == user.id,
+            AssignmentRecipient.status == "assigned",
+            LearningAssignment.status == "published",
+            AssignmentItem.question_id.in_([row["ID"] for row in rows]),
+            ~attempted,
+        )
+    )).all()
+    no_hints = {
+        question_id for question_id, hint_policy, transfer_id in assigned
+        if hint_policy == "blocked" or transfer_id == question_id
+    }
+    unavailable = no_hints | ({question_id for question_id, _, _ in assigned} if guidance_mode == "full" else set())
+    direct = {rows[0]["ID"], *(question_id.upper() for question_id in requested_ids)}
+    if direct & no_hints:
+        return [], "这道题用于独立验证。请先在当前任务中提交作答，再查看解析。"
+    if direct & unavailable:
+        return [], "请先在当前任务中提交作答，再查看完整解析。你也可以使用任务允许的辅导方式。"
+    return [row for row in rows if row["ID"] not in unavailable], None
 
 
 def _session_payload(session: ChatSession) -> dict[str, Any]:
@@ -236,7 +282,7 @@ def _tutor_system(user: User, guidance_mode: str) -> str:
     )
     if guidance_mode != "full":
         system += (
-            "题库资料中的参考答案和解析只用于内部核对；即使用户要求直接给答案，"
+            "本次辅导只提供必要的提示、反馈或当前推导步骤；即使用户要求直接给答案，"
             "也不得复述最终答案、完整数值结论或整段标准解析。"
         )
     if _is_teacher(user):
@@ -255,10 +301,12 @@ def _tutor_context_text(
     rows: list[dict[str, Any]],
     material_sources: list[dict[str, Any]],
     message: str,
+    *,
+    guidance_mode: str,
 ) -> str:
     sections: list[str] = []
     if rows:
-        sections.append(f"题库资料：\n{_context_text(rows)}")
+        sections.append(f"题库资料：\n{_context_text(rows, include_answers=guidance_mode == 'full')}")
     if material_sources:
         sections.append(f"教师批准的课程资料：\n{material_context_text(material_sources)}")
     sections.append(f"当前问题：{message}")
@@ -336,7 +384,7 @@ def _stream_interruption_message() -> str:
 
 def _attempt_analytics_payload(attempt: QuestionAttempt) -> dict[str, Any]:
     return {
-        "question_id": attempt.question_id,
+        "question_id": attempt.question_id.upper(),
         "verdict": attempt.verdict,
         "error_type": attempt.error_type,
         "hint_count": attempt.hint_count,
@@ -503,11 +551,10 @@ async def learning_summary(
             for keypoint in source.get("keypoint") or []:
                 keypoints[keypoint] = keypoints.get(keypoint, 0) + 1
     base_filter = QuestionAttempt.user_id == user.id
-    totals = (await db.execute(select(
-        func.count(QuestionAttempt.id), func.count(func.distinct(QuestionAttempt.question_id))
-    ).where(base_filter))).one()
-    graded_ids = await db.scalar(select(func.count(func.distinct(QuestionAttempt.question_id))).where(base_filter, QuestionAttempt.verdict.in_(("correct", "partial", "incorrect"))))
-    correct_count = await db.scalar(select(func.count(func.distinct(QuestionAttempt.question_id))).where(base_filter, QuestionAttempt.verdict == "correct"))
+    question_count = func.count(func.distinct(func.upper(QuestionAttempt.question_id)))
+    totals = (await db.execute(select(func.count(QuestionAttempt.id), question_count).where(base_filter))).one()
+    graded_ids = await db.scalar(select(question_count).where(base_filter, QuestionAttempt.verdict.in_(("correct", "partial", "incorrect"))))
+    correct_count = await db.scalar(select(question_count).where(base_filter, QuestionAttempt.verdict == "correct"))
     pending_review = await db.scalar(select(func.count(QuestionAttempt.id)).where(base_filter, QuestionAttempt.verdict == "needs_review"))
     error_types = dict((await db.execute(select(QuestionAttempt.error_type, func.count(QuestionAttempt.id)).where(
         base_filter, QuestionAttempt.error_type.is_not(None), QuestionAttempt.verdict != "needs_review").group_by(QuestionAttempt.error_type))).all())
@@ -641,13 +688,14 @@ async def question_detail(
     row = get_question(question_id)
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
+    question_id = row["ID"]
     teacher_view = _is_teacher(user)
     assignment = None
     if assignment_id is not None and not teacher_view:
         assignment, _, _ = await _student_assignment_context(db, user, assignment_id, question_id)
     elif not teacher_view:
         assignment = await _pending_assignment_for_question(db, user.id, question_id)
-    attempt_filter = [QuestionAttempt.user_id == user.id, QuestionAttempt.question_id == question_id]
+    attempt_filter = [QuestionAttempt.user_id == user.id, func.upper(QuestionAttempt.question_id) == question_id]
     if assignment is not None:
         attempt_filter.append(QuestionAttempt.assignment_id == assignment.id)
     can_reveal = teacher_view or bool(
@@ -672,13 +720,14 @@ async def reveal_question_answer(
     row = get_question(question_id)
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
+    question_id = row["ID"]
     if not _is_teacher(user):
         assignment = None
         if assignment_id is not None:
             assignment, _, _ = await _student_assignment_context(db, user, assignment_id, question_id)
         else:
             assignment = await _pending_assignment_for_question(db, user.id, question_id)
-        attempt_filter = [QuestionAttempt.user_id == user.id, QuestionAttempt.question_id == question_id]
+        attempt_filter = [QuestionAttempt.user_id == user.id, func.upper(QuestionAttempt.question_id) == question_id]
         if assignment is not None:
             attempt_filter.append(QuestionAttempt.assignment_id == assignment.id)
         attempted = await db.scalar(
@@ -706,6 +755,7 @@ async def question_hint(
     row = get_question(question_id)
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
+    question_id = row["ID"]
     assignment = None
     if not _is_teacher(user):
         if payload.assignment_id is not None:
@@ -729,7 +779,7 @@ async def question_hint(
     reasoning = payload.reasoning.strip()
     prompt = (
         f"题目：{row.get('question')}\n知识点：{'、'.join(row.get('keypoint') or [])}\n"
-        f"标准答案：{row.get('answer')}\n标准解析：{row.get('explanation')}\n"
+        f"选项：{row.get('choices')}\n"
         f"学生当前答案：{answer or '未填写'}\n学生思路：{reasoning or '未填写'}\n"
         "只给一个能推动下一步的提示，不得直接公布答案，控制在80字以内。"
     )
@@ -752,16 +802,28 @@ async def submit_question_attempt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    received_at = datetime.now(timezone.utc)
     row = get_question(question_id)
     if row is None:
         raise HTTPException(status_code=404, detail="题目不存在")
+    question_id = row["ID"]
     user_id = user.id
-    request_hash = hashlib.sha256(json.dumps({"question_id": question_id, **payload.model_dump(exclude={"request_key", "hint_count"})}, sort_keys=True).encode()).hexdigest()
+    answer_fields = payload.model_dump(exclude={"request_key", "hint_count"})
+
+    def submission_hash(saved_question_id: str) -> str:
+        return hashlib.sha256(json.dumps(
+            {"question_id": saved_question_id, **answer_fields}, sort_keys=True
+        ).encode()).hexdigest()
+
+    request_hash = submission_hash(question_id)
+    matching_attempt = func.upper(QuestionAttempt.question_id) == question_id
+    matching_hint = func.upper(HintEvent.question_id) == question_id
+
     async def previous_response():
         saved = await db.scalar(select(QuestionAttempt).where(QuestionAttempt.user_id == user_id, QuestionAttempt.request_key == payload.request_key))
         if saved is None:
             return None
-        if saved.request_hash != request_hash:
+        if saved.question_id.upper() != question_id or saved.request_hash != submission_hash(saved.question_id):
             raise HTTPException(status_code=409, detail="此提交编号已用于另一份作答，请重新提交")
         return await _saved_attempt_response(db, saved)
     if payload.request_key:
@@ -799,7 +861,7 @@ async def submit_question_attempt(
     previous_attempt_at = await db.scalar(
         select(func.max(QuestionAttempt.created_at)).where(
             QuestionAttempt.user_id == user.id,
-            QuestionAttempt.question_id == question_id,
+            matching_attempt,
             (
                 QuestionAttempt.assignment_id == assignment_id
                 if assignment_id is not None
@@ -809,7 +871,7 @@ async def submit_question_attempt(
     )
     hint_filters = [
         HintEvent.user_id == user.id,
-        HintEvent.question_id == question_id,
+        matching_hint,
         (
             HintEvent.assignment_id == assignment_id
             if assignment_id is not None
@@ -824,7 +886,7 @@ async def submit_question_attempt(
         await db.execute(
             select(func.count(QuestionAttempt.id)).where(
                 QuestionAttempt.user_id == user.id,
-                QuestionAttempt.question_id == question_id,
+                matching_attempt,
             )
         )
     ).scalar_one()
@@ -837,13 +899,16 @@ async def submit_question_attempt(
         "error_type从概念混淆、条件遗漏、公式选择错误、计算错误、表达不完整、无中选择。"
     )
     result: dict[str, Any] = {}
-    comparison = compare_answers(answer, str(row.get("answer") or ""))
+    comparison = compare_question_answers(
+        answer, str(row.get("answer") or ""), row.get("qtype") or "", row.get("choices")
+    )
     grading_source = "pending-review"
     if comparison is not None:
+        objective = row.get("qtype") in {"判断题", "单选题", "多选题"}
         result = {
             "verdict": "correct" if comparison else "incorrect",
-            "feedback": "答案与题库标准答案一致。请补充所用公式或关键依据。" if comparison else "当前数值与题库答案不一致，请检查计算和分母中的条件。",
-            "error_type": "" if comparison else "计算错误",
+            "feedback": "答案与题库标准答案一致。请补充关键依据。" if comparison else "作答与题库标准答案不一致。请检查判断或计算过程。",
+            "error_type": "" if comparison or objective else "计算错误",
         }
         grading_source = "structured-comparison"
     elif answer or reasoning or ocr_text:
@@ -885,7 +950,7 @@ async def submit_question_attempt(
         # taxonomy even if the provider returned an unexpected label.
         if verdict == "correct":
             error_type = ""
-        elif error_type not in ALLOWED_ERROR_TYPES:
+        elif grading_source.startswith("model:") and error_type not in ALLOWED_ERROR_TYPES:
             error_type = "表达不完整"
         feedback = feedback[:2000]
     if verdict == "needs_review":
@@ -894,20 +959,14 @@ async def submit_question_attempt(
     # Independence is global to the question, not reset by another assignment.
     await db.execute(select(User.id).where(User.id == user_id).with_for_update())
     prior_count = int(await db.scalar(select(func.count(QuestionAttempt.id)).where(
-        QuestionAttempt.user_id == user_id, QuestionAttempt.question_id == question_id)) or 0)
+        QuestionAttempt.user_id == user_id, matching_attempt)) or 0)
     support_count = await db.scalar(select(func.count(LearningSupportEvent.id)).where(
-        LearningSupportEvent.user_id == user_id, LearningSupportEvent.question_id == question_id))
+        LearningSupportEvent.user_id == user_id, func.upper(LearningSupportEvent.question_id) == question_id))
     all_hints = await db.scalar(select(func.count(HintEvent.id)).where(
-        HintEvent.user_id == user_id, HintEvent.question_id == question_id))
+        HintEvent.user_id == user_id, matching_hint))
     independent_eligible = prior_count == 0 and not support_count and not all_hints
-    submitted_late = False
-    if assignment and assignment.due_at:
-        due_at = assignment.due_at
-        submitted_late = (
-            datetime.now(timezone.utc) > due_at
-            if due_at.tzinfo is not None
-            else datetime.now() > due_at
-        )
+    due_at = deadline_utc(assignment.due_at) if assignment else None
+    submitted_late = due_at is not None and received_at > due_at
     attempt = QuestionAttempt(
         user_id=user_id,
         request_key=payload.request_key,
@@ -944,13 +1003,13 @@ async def submit_question_attempt(
         # Another request may have claimed the first unaided attempt while this
         # answer was being diagnosed. Keep the work as a correction instead.
         first = await db.scalar(select(QuestionAttempt.id).where(
-            QuestionAttempt.user_id == user_id, QuestionAttempt.question_id == question_id,
+            QuestionAttempt.user_id == user_id, matching_attempt,
             QuestionAttempt.independent_eligible.is_(True)).limit(1))
         if not independent_eligible or first is None:
             raise
         attempt.independent_eligible = False
         attempt.attempt_no = 1 + int(await db.scalar(select(func.count(QuestionAttempt.id)).where(
-            QuestionAttempt.user_id == user_id, QuestionAttempt.question_id == question_id)) or 0)
+            QuestionAttempt.user_id == user_id, matching_attempt)) or 0)
         db.add(attempt)
         await db.commit()
     await db.refresh(attempt)
@@ -965,7 +1024,7 @@ async def _saved_attempt_response(db: AsyncSession, attempt: QuestionAttempt) ->
             AssignmentRecipient.assignment_id == attempt.assignment_id,
             AssignmentRecipient.student_id == attempt.user_id))
         total = await db.scalar(select(func.count(AssignmentItem.id)).where(AssignmentItem.assignment_id == attempt.assignment_id))
-        count = await db.scalar(select(func.count(func.distinct(QuestionAttempt.question_id))).where(
+        count = await db.scalar(select(func.count(func.distinct(func.upper(QuestionAttempt.question_id)))).where(
             QuestionAttempt.assignment_id == attempt.assignment_id, QuestionAttempt.user_id == attempt.user_id))
         completed = bool(total and count >= total)
         if recipient and completed and recipient.status != "completed":
@@ -997,7 +1056,7 @@ async def list_question_attempts(
             select(QuestionAttempt)
             .where(QuestionAttempt.user_id == user.id,
                 *([QuestionAttempt.assignment_id == assignment_id] if assignment_id else []),
-                *([QuestionAttempt.question_id == question_id] if question_id else []))
+                *([func.upper(QuestionAttempt.question_id) == question_id.upper()] if question_id else []))
             .order_by(QuestionAttempt.id.desc())
             .offset(offset).limit(limit)
         )
@@ -1005,7 +1064,7 @@ async def list_question_attempts(
     return [
         {
             "id": item.id,
-            "question_id": item.question_id,
+            "question_id": item.question_id.upper(),
             "assignment_id": item.assignment_id,
             "answer": item.answer_text, "reasoning": item.reasoning,
             "feedback": item.feedback, "image_data_url": item.image_data_url,
@@ -1144,9 +1203,15 @@ async def assistant(
     )
     if mode == "recommend":
         context_rows = _ordered_recommendations(context_rows)
-    elif not _is_teacher(user):
-        for context_row in context_rows:
-            db.add(LearningSupportEvent(user_id=user.id, question_id=context_row["ID"], kind="tutor"))
+        assignment_notice = None
+    else:
+        requested_ids = [*question_ids, *carried_ids, *re.findall(r"P\d{6}", message.upper())]
+        context_rows, assignment_notice = await _tutor_assignment_sources(
+            db, user, context_rows, requested_ids, guidance_mode
+        )
+        if not _is_teacher(user):
+            for row in context_rows:
+                db.add(LearningSupportEvent(user_id=user.id, question_id=row["ID"], kind="tutor"))
     session.updated_at = datetime.now(timezone.utc)
     if session.title == "新对话":
         session.title = message[:36]
@@ -1162,7 +1227,7 @@ async def assistant(
             message,
             guidance_mode=guidance_mode,
         )
-        if mode == "answer"
+        if mode == "answer" and not assignment_notice
         else []
     )
     sources = [*_sources_from_rows(context_rows), *material_sources]
@@ -1186,6 +1251,9 @@ async def assistant(
             "session_id": session.id,
         }
 
+    if assignment_notice:
+        return await save_answer(assignment_notice, [], "retrieval-only")
+
     if not context_rows and not material_sources:
         return await save_answer(
             "我暂时没有在题库或当前课程资料中找到足够接近的内容。"
@@ -1208,7 +1276,9 @@ async def assistant(
     system = _tutor_system(user, guidance_mode)
     try:
         conversation = [ChatMessage(item.role, item.content) for item in history]
-        conversation.append(ChatMessage("user", _tutor_context_text(context_rows, material_sources, message)))
+        conversation.append(ChatMessage(
+            "user", _tutor_context_text(context_rows, material_sources, message, guidance_mode=guidance_mode)
+        ))
         answer = await LLMClient(name="question_bank_tutor").chat(
             conversation,
             system=system,
@@ -1280,9 +1350,15 @@ async def assistant_stream(
     )
     if mode == "recommend":
         context_rows = _ordered_recommendations(context_rows)
-    elif not _is_teacher(user):
-        for context_row in context_rows:
-            db.add(LearningSupportEvent(user_id=user.id, question_id=context_row["ID"], kind="tutor"))
+        assignment_notice = None
+    else:
+        requested_ids = [*question_ids, *carried_ids, *re.findall(r"P\d{6}", message.upper())]
+        context_rows, assignment_notice = await _tutor_assignment_sources(
+            db, user, context_rows, requested_ids, guidance_mode
+        )
+        if not _is_teacher(user):
+            for row in context_rows:
+                db.add(LearningSupportEvent(user_id=user.id, question_id=row["ID"], kind="tutor"))
     session.updated_at = datetime.now(timezone.utc)
     if session.title == "新对话":
         session.title = message[:36]
@@ -1298,7 +1374,7 @@ async def assistant_stream(
             message,
             guidance_mode=guidance_mode,
         )
-        if mode == "answer"
+        if mode == "answer" and not assignment_notice
         else []
     )
     sources = [*_sources_from_rows(context_rows), *material_sources]
@@ -1308,7 +1384,11 @@ async def assistant_stream(
             return json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n"
 
         yield line("meta", {"session_id": session.id, "sources": sources})
-        if not context_rows and not material_sources:
+        if assignment_notice:
+            answer = assignment_notice
+            yield line("delta", answer)
+            model = "retrieval-only"
+        elif not context_rows and not material_sources:
             answer = (
                 "我暂时没有在题库或当前课程资料中找到足够接近的内容。"
                 "请补充题号、知识点或更完整的题干。"
@@ -1327,19 +1407,20 @@ async def assistant_stream(
             conversation.append(
                 ChatMessage(
                     "user",
-                    _tutor_context_text(context_rows, material_sources, message),
+                    _tutor_context_text(context_rows, material_sources, message, guidance_mode=guidance_mode),
                 )
             )
             client = LLMClient(name="question_bank_tutor")
             chunks: list[str] = []
             try:
-                async for chunk in client.stream_chat(
+                async with aclosing(client.stream_chat(
                     conversation,
                     system=_tutor_system(user, guidance_mode),
                     max_tokens=4096,
-                ):
-                    chunks.append(chunk)
-                    yield line("delta", chunk)
+                )) as upstream:
+                    async for chunk in upstream:
+                        chunks.append(chunk)
+                        yield line("delta", chunk)
                 answer = "".join(chunks)
                 if not answer.strip():
                     raise RuntimeError("模型返回了空内容")

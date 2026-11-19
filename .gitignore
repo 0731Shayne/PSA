@@ -21,6 +21,8 @@ backend/static/
 
 *.db
 *.sqlite3
+*.backup
+*.dump
 *.log
 
 .DS_Store

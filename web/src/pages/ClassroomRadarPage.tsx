@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Skeleton, Tag, Tabs, Drawer, message } from "antd";
 import { CheckCircleOutlined, CopyOutlined, DeleteOutlined, InboxOutlined, PlusOutlined, RadarChartOutlined, ReloadOutlined, SendOutlined, StopOutlined, SyncOutlined, TeamOutlined, UserDeleteOutlined, WarningOutlined } from "@ant-design/icons";
 import { useSearchParams } from "react-router-dom";
@@ -24,11 +24,15 @@ export default function ClassroomRadarPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [search,setSearch] = useSearchParams();
   const [selectedId, setSelectedId] = useState<number>(Number(search.get("classroom")) || 0);
+  const selectedClassroomId = useRef(selectedId);
+  const radarRequest = useRef(0);
+  const classroomRequest = useRef(0);
+  const selectionRevision = useRef(0);
   const requestedPanel = search.get("tab") || "overview";
   const panel = ["overview","students","tasks","review"].includes(requestedPanel) ? requestedPanel : "overview";
   const [studentDetail,setStudentDetail] = useState<StudentRow|null>(null);
   function showPanel(tab:string) { setSearch(previous=>{const next=new URLSearchParams(previous);next.set("tab",tab);return next;}); }
-  const [radar, setRadar] = useState<Radar | null>(null);
+  const [radarData, setRadarData] = useState<Radar | null>(null);
   const [loading, setLoading] = useState(true);
   const [radarLoading, setRadarLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -38,27 +42,59 @@ export default function ClassroomRadarPage() {
   const [intervening, setIntervening] = useState(false);
   const [publishingInterventions, setPublishingInterventions] = useState(false);
   const [interventionPreview, setInterventionPreview] = useState<InterventionPreview | null>(null);
+  const radar = radarData?.classroom.id === selectedId ? radarData : null;
+
+  function selectClassroom(id: number) {
+    if (id === selectedClassroomId.current) return;
+    selectedClassroomId.current = id;
+    selectionRevision.current++;
+    radarRequest.current++;
+    setSelectedId(id);
+    setRadarData(null);
+    setRadarLoading(Boolean(id));
+    setStudentDetail(null);
+    setInterventionPreview(null);
+    setIntervening(false);
+    setError(false);
+  }
 
   async function loadClassrooms(preferredId?: number) {
+    const requestId = ++classroomRequest.current;
     setLoading(true);
     try {
       const response = await apiClient.get<Classroom[]>("/api/classrooms");
+      if (requestId !== classroomRequest.current) return;
       setClassrooms(response.data);
-      const next = preferredId || selectedId || response.data[0]?.id;
-      setSelectedId(next);
+      const current = preferredId ?? selectedClassroomId.current;
+      const next = response.data.find(item => item.id === current)?.id ?? response.data[0]?.id ?? 0;
+      selectClassroom(next);
       setError(false);
-    } catch { setError(true); } finally { setLoading(false); }
+    } catch {
+      if (requestId === classroomRequest.current) setError(true);
+    } finally {
+      if (requestId === classroomRequest.current) setLoading(false);
+    }
   }
 
   async function loadRadar(id = selectedId) {
-    if (!id) { setRadar(null); return; }
+    if (!id || id !== selectedClassroomId.current) return;
+    const requestId = ++radarRequest.current;
     setRadarLoading(true);
-    try { const response = await apiClient.get<Radar>(`/api/classrooms/${id}/radar`); setRadar(response.data); setError(false); }
-    catch { setError(true); } finally { setRadarLoading(false); }
+    try {
+      const response = await apiClient.get<Radar>(`/api/classrooms/${id}/radar`);
+      if (requestId !== radarRequest.current) return;
+      setRadarData(response.data);
+      setError(false);
+    } catch {
+      if (requestId === radarRequest.current) setError(true);
+    } finally {
+      if (requestId === radarRequest.current) setRadarLoading(false);
+    }
   }
 
   useEffect(() => { if (teacher) void loadClassrooms(); }, [teacher]);
-  useEffect(() => { if (selectedId) void loadRadar(selectedId); }, [selectedId]);
+  useEffect(() => { if (teacher && selectedId) void loadRadar(selectedId); }, [teacher, selectedId]);
+  useEffect(() => () => { radarRequest.current++; classroomRequest.current++; selectionRevision.current++; }, []);
 
   if (!teacher) return <Alert type="warning" showIcon message="班级认知雷达仅供教师使用" description="学生可以在“我的任务”中加入班级并完成教师下发的任务。" />;
 
@@ -73,7 +109,7 @@ export default function ClassroomRadarPage() {
   }
 
   async function publishDiagnostic(values: { title?: string; topic: string; count: number; due_at?: { toISOString: () => string } }) {
-    if (!selectedId) return;
+    if (!radar || selectedId !== selectedClassroomId.current) return;
     setPublishing(true);
     try {
       await apiClient.post(`/api/classrooms/${selectedId}/assignments`, { ...values, due_at: values.due_at?.toISOString() });
@@ -86,16 +122,19 @@ export default function ClassroomRadarPage() {
   }
 
   async function createInterventions() {
-    if (!selectedId) return;
+    if (!radar || selectedId !== selectedClassroomId.current) return;
+    const revision = selectionRevision.current;
     setIntervening(true);
     try {
-      const response = await apiClient.post<InterventionPreview>(`/api/classrooms/${selectedId}/interventions/preview`, { source_assignment_id: radar?.assignments[0]?.id });
+      const response = await apiClient.post<InterventionPreview>(`/api/classrooms/${selectedId}/interventions/preview`, { source_assignment_id: radar.assignments[0]?.id });
+      if (revision !== selectionRevision.current) return;
       setInterventionPreview(response.data);
       message.info(`已生成 ${response.data.groups} 组草稿，请审核后再下发`);
     } catch (error: unknown) {
+      if (revision !== selectionRevision.current) return;
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       message.error(detail || "干预任务草稿生成失败，请稍后重试");
-    } finally { setIntervening(false); }
+    } finally { if (revision === selectionRevision.current) setIntervening(false); }
   }
 
   function updateDraft(index: number, patch: Partial<InterventionDraft>) {
@@ -107,7 +146,8 @@ export default function ClassroomRadarPage() {
   }
 
   async function publishInterventions() {
-    if (!selectedId || !interventionPreview?.tasks.length) return;
+    if (!radar || selectedId !== selectedClassroomId.current || !interventionPreview?.tasks.length) return;
+    const revision = selectionRevision.current;
     setPublishingInterventions(true);
     try {
       const response = await apiClient.post<{ groups: number; students: number }>(`/api/classrooms/${selectedId}/interventions`, {
@@ -115,7 +155,7 @@ export default function ClassroomRadarPage() {
         tasks: interventionPreview.tasks,
       });
       message.success(`已下发 ${response.data.groups} 组任务，覆盖 ${response.data.students} 名学生`);
-      setInterventionPreview(null);
+      if (revision === selectionRevision.current) setInterventionPreview(null);
       await loadRadar(selectedId);
     } catch (error: unknown) {
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -131,33 +171,34 @@ export default function ClassroomRadarPage() {
   }
 
   async function regenerateCode() {
-    if (!selectedId) return;
+    if (!radar || selectedId !== selectedClassroomId.current) return;
     try {
       const response = await apiClient.post<{ join_code: string }>(`/api/classrooms/${selectedId}/join-code`);
       message.success(`新班级码已生成：${response.data.join_code}`);
-      await Promise.all([loadClassrooms(selectedId), loadRadar(selectedId)]);
+      await Promise.all([loadClassrooms(), loadRadar(selectedId)]);
     } catch { message.error("班级码更新失败，请稍后重试"); }
   }
 
   async function setClassroomStatus(status: "active" | "archived") {
-    if (!selectedId) return;
+    if (!radar || selectedId !== selectedClassroomId.current) return;
     try {
       await apiClient.patch(`/api/classrooms/${selectedId}`, { status });
       message.success(status === "archived" ? "班级已归档，学生不能再通过班级码加入" : "班级已恢复，可以继续发布任务");
-      await Promise.all([loadClassrooms(selectedId), loadRadar(selectedId)]);
+      await Promise.all([loadClassrooms(), loadRadar(selectedId)]);
     } catch { message.error("班级状态更新失败，请稍后重试"); }
   }
 
   async function removeStudent(studentId: number, studentName: string) {
-    if (!selectedId) return;
+    if (!radar || selectedId !== selectedClassroomId.current) return;
     try {
       await apiClient.delete(`/api/classrooms/${selectedId}/members/${studentId}`);
       message.success(`${studentName} 已移出班级；既有作答证据仍会保留`);
-      await Promise.all([loadClassrooms(selectedId), loadRadar(selectedId)]);
+      await Promise.all([loadClassrooms(), loadRadar(selectedId)]);
     } catch { message.error("移出学生失败，请稍后重试"); }
   }
 
   async function setAssignmentStatus(assignmentId: number, status: "published" | "cancelled" | "archived") {
+    if (!radar || selectedId !== selectedClassroomId.current) return;
     try {
       await apiClient.patch(`/api/assignments/${assignmentId}`, { status });
       message.success(status === "published" ? "任务已重新发布" : status === "cancelled" ? "任务已撤回，学生端不再显示" : "任务已归档");
@@ -182,10 +223,10 @@ export default function ClassroomRadarPage() {
 
     {showCreate && <section className="mt-5 border-y border-slate-200 bg-white px-5 py-5" aria-labelledby="create-class-heading"><h2 id="create-class-heading" className="mb-4 text-lg font-bold text-slate-900">创建一个课程班级</h2><Form layout="inline" onFinish={createClass} initialValues={{ course_name: "概率论与数理统计" }} className="gap-y-3"><Form.Item name="name" label="班级名称" rules={[{ required: true, message: "请输入班级名称" }]}><Input placeholder="如：2026级统计学1班" maxLength={160} /></Form.Item><Form.Item name="course_name" label="课程名称"><Input maxLength={160} /></Form.Item><Form.Item><Button type="primary" htmlType="submit" loading={creating}>创建并生成班级码</Button></Form.Item></Form></section>}
 
-    {error && <Alert className="mt-5" type="error" showIcon message="班级数据暂时无法载入" description="请检查连接后重试；已保存的任务和作答不会丢失。" action={<Button size="small" onClick={() => loadClassrooms()}>重新加载</Button>} />}
+    {error && <Alert className="mt-5" type="error" showIcon message="班级数据暂时无法载入" description="请检查连接后重试。已保存的任务和作答会保留。" action={<Button size="small" onClick={() => { void loadClassrooms(); if (selectedId) void loadRadar(); }}>重新加载</Button>} />}
     {loading ? <div className="mt-6"><Skeleton active paragraph={{ rows: 5 }} /></div> : classrooms.length === 0 ? <section className="mt-6 flex min-h-80 flex-col items-center justify-center border border-slate-200 bg-white px-6 text-center"><TeamOutlined className="text-3xl text-teal-700" /><h2 className="mt-4 text-lg font-bold text-slate-900">先创建第一个班级</h2><p className="mt-2 max-w-lg text-base leading-7 text-slate-600">学生使用班级码加入后，你就可以发布短诊断，并从真实作答证据生成班级认知雷达。</p><Button className="mt-5" type="primary" onClick={() => setShowCreate(true)}>创建班级</Button></section> : <>
       <section className="mt-6 flex flex-wrap items-center gap-4 border-y border-slate-200 bg-white px-5 py-4">
-        <Select className="min-w-60" value={selectedId} onChange={setSelectedId} options={classrooms.map(item => ({ value: item.id, label: item.status === "archived" ? `${item.name}（已归档）` : item.name }))} aria-label="选择班级" />
+        <Select className="min-w-60" value={selectedId} onChange={selectClassroom} options={classrooms.map(item => ({ value: item.id, label: item.status === "archived" ? `${item.name}（已归档）` : item.name }))} aria-label="选择班级" />
         {radar && <><span className="text-sm text-slate-500">班级码</span><button onClick={copyCode} className="flex min-h-10 items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 font-mono text-sm font-bold tracking-wider text-teal-900"><span>{radar.classroom.join_code}</span><CopyOutlined /></button><span className="text-sm text-slate-500">{radar.classroom.status === "active" ? "学生输入此码即可加入" : "班级已归档，当前班级码不可加入"}</span><div className="ml-auto flex flex-wrap gap-2"><Popconfirm title="生成新班级码？" description="原班级码会立即失效，已加入的学生不受影响。" okText="生成" cancelText="取消" onConfirm={regenerateCode}><Button icon={<SyncOutlined />}>更换班级码</Button></Popconfirm>{radar.classroom.status === "active" ? <Popconfirm title="归档这个班级？" description="归档后不能加入或发布新任务，历史数据会保留。" okText="归档" cancelText="取消" onConfirm={() => setClassroomStatus("archived")}><Button icon={<InboxOutlined />}>归档班级</Button></Popconfirm> : <Button type="primary" icon={<ReloadOutlined />} onClick={() => setClassroomStatus("active")}>恢复班级</Button>}</div></>}
       </section>
 
@@ -233,7 +274,7 @@ export default function ClassroomRadarPage() {
 
         <section className="mt-8 overflow-hidden border border-slate-200 bg-white" aria-labelledby="assignment-heading"><div className="border-b border-slate-200 px-5 py-4"><h2 id="assignment-heading" className="text-lg font-bold text-slate-900">最近任务</h2></div>{radar.assignments.length === 0 ? <Empty className="!my-8" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有发布任务" /> : <div className="divide-y divide-slate-100">{radar.assignments.map(item => <div key={item.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-900">{item.title}</span><Tag>{kindLabel[item.kind] || item.kind}</Tag>{item.status !== "published" && <Tag color={item.status === "cancelled" ? "red" : "default"}>{item.status === "cancelled" ? "已撤回" : "已归档"}</Tag>}{Boolean(item.late_submission_count) && <Tag color="red">{item.late_submission_count} 次迟交</Tag>}</div><p className="mt-1 text-sm text-slate-600">{item.question_ids.length} 道题 · {item.topic}{item.due_at ? ` · 截止 ${new Date(item.due_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}</p></div><span className="text-sm text-slate-600">{item.completed_count}/{item.recipient_count} 人完成</span><Progress className="!mb-0 w-36" percent={item.recipient_count ? Math.round(item.completed_count / item.recipient_count * 100) : 0} size="small" showInfo={false} />{item.status === "published" ? <Popconfirm title="撤回这项任务？" description="学生端将不再显示，已有作答和完成进度会保留。" okText="撤回" cancelText="取消" onConfirm={() => setAssignmentStatus(item.id, "cancelled")}><Button danger type="text" icon={<StopOutlined />}>撤回</Button></Popconfirm> : <div className="flex gap-1"><Button type="link" onClick={() => setAssignmentStatus(item.id, "published")}>重新发布</Button>{item.status !== "archived" && <Button type="text" icon={<InboxOutlined />} onClick={() => setAssignmentStatus(item.id, "archived")}>归档</Button>}</div>}</div>)}</div>}</section>
 </>}
-        {panel === "review" && selectedId && <ReviewQueue classroomId={selectedId} onReviewed={()=>loadRadar(selectedId)}/>}
+        {panel === "review" && selectedId && <ReviewQueue key={selectedId} classroomId={selectedId} onReviewed={()=>loadRadar(selectedId)}/>}
       </>}
     </>}
     <Drawer title={studentDetail?`${studentDetail.name} · 学习证据`:"学生证据"} open={!!studentDetail} onClose={()=>setStudentDetail(null)}>{studentDetail && <div className="space-y-4"><p>当前任务需要：{studentDetail.group_label}</p><p>下一焦点：{studentDetail.group_focus || studentDetail.next_focus}</p><p>依据 {studentDetail.questions} 道已判定题目、{studentDetail.attempts} 次作答。</p><p>掌握度 {studentDetail.overall_mastery}% · {evidenceLabel[studentDetail.evidence_level]}</p><p>主要问题：{studentDetail.top_error || "暂无集中错误"}</p><Alert type="info" message="这些数值用于安排后续练习，不是固定能力标签" description="重复订正不增加证据题数；待复核作答不计入掌握度。"/></div>}</Drawer>

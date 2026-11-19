@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Result, Segmented, Select, Skeleton, Tag, message } from "antd";
 import { BankOutlined, CheckCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileTextOutlined, HistoryOutlined, PrinterOutlined, ReadOutlined, SafetyCertificateOutlined, SaveOutlined, SendOutlined, TeamOutlined, WarningOutlined } from "@ant-design/icons";
 import axios from "axios";
@@ -114,7 +114,6 @@ export default function TeachingStudio() {
   const [printing, setPrinting] = useState(false);
   const [plansLoading, setPlansLoading] = useState(true);
   const [plansError, setPlansError] = useState(false);
-  const [dirty, setDirty] = useState(false);
   const [view, setView] = useState<ViewKey>("teacher");
   const [insights, setInsights] = useState<Insights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
@@ -123,6 +122,14 @@ export default function TeachingStudio() {
   const [showPublishPreview, setShowPublishPreview] = useState(false);
   const previewContent = useDeferredValue(content);
   const previewStudentContent = useDeferredValue(studentContent);
+  const activePlanId = useRef<number | undefined>(undefined);
+  const insightsRequest = useRef(0);
+  const dirty = active !== null && (content !== active.content || studentContent !== active.student_content);
+  const studentVersion = view === "student" || view === "edit_student";
+  const versionLabel = studentVersion ? "学生学习单" : "教师执行版";
+  const versionContent = studentVersion ? studentContent : content;
+
+  useEffect(() => () => { insightsRequest.current++; }, []);
 
   useEffect(() => {
     if (!teacher) return;
@@ -146,7 +153,6 @@ export default function TeachingStudio() {
       if (!dirty) return;
       if (window.confirm("当前教学包有尚未保存的修改，确定离开吗？")) {
         setUnsavedChanges(false);
-        setDirty(false);
       } else {
         window.history.forward();
       }
@@ -173,21 +179,23 @@ export default function TeachingStudio() {
   if (!teacher) return <Result status="403" title="教师专属功能" subTitle="学生账号可以使用智能答疑和题库练习。" />;
 
   function selectPlan(plan: Plan) {
-    if (dirty && active?.id !== plan.id) {
+    if (activePlanId.current === plan.id) return;
+    if (dirty) {
       message.warning("请先保存当前修改，再切换到其他教学包");
       return;
     }
+    activePlanId.current = plan.id;
     setActive(plan);
     setContent(plan.content);
     setStudentContent(plan.student_content);
     setView("teacher");
-    setDirty(false);
     setInsights(null);
     setPublishClassroomId(plan.classroom_id || classrooms[0]?.id);
     void loadInsights(plan);
   }
 
   async function loadInsights(plan: Plan) {
+    const request = ++insightsRequest.current;
     setInsightsLoading(true);
     try {
       const response = await apiClient.get<Insights>("/api/question-bank/teaching-insights", {
@@ -197,11 +205,11 @@ export default function TeachingStudio() {
           classroom_id: plan.classroom_id || undefined,
         },
       });
-      setInsights(response.data);
+      if (request === insightsRequest.current) setInsights(response.data);
     } catch {
-      setInsights(null);
+      if (request === insightsRequest.current) setInsights(null);
     } finally {
-      setInsightsLoading(false);
+      if (request === insightsRequest.current) setInsightsLoading(false);
     }
   }
 
@@ -221,15 +229,21 @@ export default function TeachingStudio() {
   }
 
   async function submit(values: GenerateValues) {
+    if (dirty) {
+      message.warning("请先保存当前修改，再生成新的教学包");
+      return;
+    }
     setLoading(true);
     try {
       const response = await apiClient.post<Plan>("/api/question-bank/teaching-plan", values);
+      activePlanId.current = response.data.id;
+      insightsRequest.current++;
       setActive(response.data);
       setContent(response.data.content);
       setStudentContent(response.data.student_content);
       setView("teacher");
-      setDirty(false);
       setInsights(response.data.insights || null);
+      setInsightsLoading(false);
       setPublishClassroomId(response.data.classroom_id || values.classroom_id || classrooms[0]?.id);
       try {
         await refreshPlans(response.data.id);
@@ -249,9 +263,8 @@ export default function TeachingStudio() {
     setSaving(true);
     try {
       await apiClient.put(`/api/question-bank/teaching-plans/${active.id}`, { title: active.title, content, student_content: studentContent });
-      setActive({ ...active, content, student_content: studentContent });
+      setActive(current => current?.id === active.id ? { ...current, content, student_content: studentContent } : current);
       setPlans(items => items.map(item => item.id === active.id ? { ...item, content, student_content: studentContent } : item));
-      setDirty(false);
       message.success("教师执行版和学生学习单已保存");
     } catch {
       message.error("保存失败，当前编辑内容仍保留在页面中");
@@ -263,12 +276,14 @@ export default function TeachingStudio() {
   async function remove(plan: Plan) {
     try {
       await apiClient.delete(`/api/question-bank/teaching-plans/${plan.id}`);
-      if (active?.id === plan.id) {
+      if (activePlanId.current === plan.id) {
+        activePlanId.current = undefined;
+        insightsRequest.current++;
         setActive(null);
         setContent("");
         setStudentContent("");
-        setDirty(false);
         setInsights(null);
+        setInsightsLoading(false);
       }
       setPlans(items => items.filter(item => item.id !== plan.id));
       message.success("教学包已删除");
@@ -279,13 +294,11 @@ export default function TeachingStudio() {
 
   function download() {
     if (!active) return;
-    const studentVersion = view === "student";
-    const downloadContent = studentVersion ? studentContent : content;
-    const blob = new Blob([downloadContent], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([versionContent], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${active.topic.replace(/[\\/:*?"<>|]/g, "-")}-${studentVersion ? "学生学习单" : "教师执行版"}.md`;
+    anchor.download = `${active.topic.replace(/[\\/:*?"<>|]/g, "-")}-${versionLabel}.md`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -445,7 +458,7 @@ export default function TeachingStudio() {
               <div className="grid gap-5 xl:grid-cols-2">
                 <section aria-labelledby="markdown-source-heading">
                   <div className="mb-3 flex items-center justify-between gap-3"><h3 id="markdown-source-heading" className="font-extrabold text-slate-800">{view === "edit_student" ? "学生学习单" : "教师执行版"} Markdown 源码</h3><Tag>可编辑</Tag></div>
-                  <Input.TextArea aria-label={view === "edit_student" ? "编辑学生学习单内容" : "编辑教师执行版内容"} value={view === "edit_student" ? studentContent : content} onChange={event => { if (view === "edit_student") setStudentContent(event.target.value); else setContent(event.target.value); setDirty(view === "edit_student" ? event.target.value !== active.student_content || content !== active.content : event.target.value !== active.content || studentContent !== active.student_content); }} autoSize={{ minRows: 28 }} maxLength={80000} className="!font-mono !text-sm !leading-7" />
+                  <Input.TextArea aria-label={view === "edit_student" ? "编辑学生学习单内容" : "编辑教师执行版内容"} value={view === "edit_student" ? studentContent : content} onChange={event => { if (view === "edit_student") setStudentContent(event.target.value); else setContent(event.target.value); }} autoSize={{ minRows: 28 }} maxLength={80000} className="!font-mono !text-sm !leading-7" />
                 </section>
                 <section aria-labelledby="formula-preview-heading" aria-busy={previewContent !== content} className="min-w-0 rounded-2xl border border-slate-200 bg-white">
                   <div className="sticky top-0 z-10 flex items-center justify-between gap-3 rounded-t-2xl border-b border-slate-200 bg-slate-50/95 px-5 py-3 backdrop-blur"><h3 id="formula-preview-heading" className="font-extrabold text-slate-800">公式与排版预览</h3><Tag color={(view === "edit_student" ? previewStudentContent === studentContent : previewContent === content) ? "success" : "processing"}>{(view === "edit_student" ? previewStudentContent === studentContent : previewContent === content) ? "已同步" : "更新中"}</Tag></div>
@@ -461,7 +474,7 @@ export default function TeachingStudio() {
         </> : <EmptyTeachingState classrooms={classrooms} onGoClassrooms={() => navigate("/classrooms")} onChoose={topic=>{setupForm.setFieldsValue({topic});setupForm.submit();}} />}
       </section>
     </div>
-  </div>{printing && active && <article className="teaching-print-document"><header><h1>{active.title}</h1><p>{view === "student" ? "学生学习单" : "教师执行版"} · {active.duration} 分钟</p></header><div className="teaching-markdown"><MathMarkdown>{view === "student" ? studentContent : content}</MathMarkdown></div></article>}{active && <Modal open={showPublishPreview} title="发布前确认" okText="确认发布" cancelText="返回修改" confirmLoading={publishing} onOk={publish} onCancel={() => setShowPublishPreview(false)}><div className="space-y-3 text-sm"><p><strong>班级：</strong>{selectedClassroom?.name || "未选择"}</p><p><strong>任务：</strong>{active.topic} · {publishSections.find(item => item.value === publishSection)?.label}</p><p><strong>题目：</strong>{publishQuestionIds(active).join("、") || "无"}</p><p><strong>提示策略：</strong>{publishSection === "exit" ? "全程无提示" : publishSection === "diagnostic" ? "允许提示" : "练习可提示，最后一道迁移题无提示"}</p><Alert type="info" showIcon message="确认后会立即出现在学生的“我的任务”中" /></div></Modal>}</>;
+  </div>{printing && active && <article className="teaching-print-document"><header><h1>{active.title}</h1><p>{versionLabel} · {active.duration} 分钟</p></header><div className="teaching-markdown"><MathMarkdown>{versionContent}</MathMarkdown></div></article>}{active && <Modal open={showPublishPreview} title="发布前确认" okText="确认发布" cancelText="返回修改" confirmLoading={publishing} onOk={publish} onCancel={() => setShowPublishPreview(false)}><div className="space-y-3 text-sm"><p><strong>班级：</strong>{selectedClassroom?.name || "未选择"}</p><p><strong>任务：</strong>{active.topic} · {publishSections.find(item => item.value === publishSection)?.label}</p><p><strong>题目：</strong>{publishQuestionIds(active).join("、") || "无"}</p><p><strong>提示策略：</strong>{publishSection === "exit" ? "全程无提示" : publishSection === "diagnostic" ? "允许提示" : "练习可提示，最后一道迁移题无提示"}</p><Alert type="info" showIcon message="确认后会立即出现在学生的“我的任务”中" /></div></Modal>}</>;
 }
 
 function InsightsPanel({ data, packageData, loading, onRetry }: { data: Insights | null; packageData: PackageManifest; loading: boolean; onRetry: () => void }) {

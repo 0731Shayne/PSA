@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import secrets
 import string
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -25,6 +26,7 @@ from ..db.session import get_db
 from ..question_bank.analytics import select_layered_questions
 from ..question_bank.service import compact_question, get_question, load_questions, retrieve_context
 from .analytics import build_classroom_radar, suggest_intervention_questions
+from .deadlines import deadline_utc
 
 
 router = APIRouter()
@@ -141,16 +143,6 @@ async def _unique_join_code(db: AsyncSession) -> str:
     raise HTTPException(status_code=503, detail="暂时无法生成班级码，请稍后重试")
 
 
-def _parse_due_at(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="截止时间格式无效") from exc
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 async def _assignment_payload(db: AsyncSession, assignment: LearningAssignment, user_id: int | None = None) -> dict[str, Any]:
     items = (
         await db.execute(
@@ -184,6 +176,7 @@ async def _assignment_payload(db: AsyncSession, assignment: LearningAssignment, 
                 )
             )
         ).scalar_one_or_none()
+    due_at = deadline_utc(assignment.due_at)
     payload = {
         "id": assignment.id,
         "classroom_id": assignment.classroom_id,
@@ -201,14 +194,14 @@ async def _assignment_payload(db: AsyncSession, assignment: LearningAssignment, 
         "late_submission_count": int(late_submission_count or 0),
         "my_status": recipient.status if recipient else None,
         "group_label": recipient.group_label if recipient else None,
-        "due_at": assignment.due_at.isoformat() if assignment.due_at else None,
+        "due_at": due_at.isoformat() if due_at else None,
         "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
     }
 
     if user_id is not None:
         attempted_ids = (
             await db.execute(
-                select(QuestionAttempt.question_id)
+                select(func.upper(QuestionAttempt.question_id))
                 .where(
                     QuestionAttempt.assignment_id == assignment.id,
                     QuestionAttempt.user_id == user_id,
@@ -254,14 +247,14 @@ async def _radar_data(db: AsyncSession, classroom: Classroom) -> dict[str, Any]:
         [
             {
                 "user_id": item.user_id,
-                "question_id": item.question_id,
+                "question_id": item.question_id.upper(),
                 "verdict": item.verdict,
                 "error_type": item.error_type,
                 "hint_count": item.hint_count,
                 "attempt_no": item.attempt_no,
                 "independent_eligible": item.independent_eligible,
                 "assignment_kind": assignment_kind.get(item.assignment_id),
-                "is_transfer": assignment_transfer.get(item.assignment_id) == item.question_id,
+                "is_transfer": assignment_transfer.get(item.assignment_id) == item.question_id.upper(),
                 "created_at": item.created_at.isoformat() if item.created_at else None,
             }
             for item in attempts
@@ -446,8 +439,19 @@ async def join_classroom(
         )
     ).scalar_one_or_none()
     if existing is None:
-        db.add(ClassroomMembership(classroom_id=classroom.id, student_id=user.id))
-        await db.commit()
+        classroom_id, student_id = classroom.id, user.id
+        db.add(ClassroomMembership(classroom_id=classroom_id, student_id=student_id))
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            membership = await db.scalar(select(ClassroomMembership.id).where(
+                ClassroomMembership.classroom_id == classroom_id,
+                ClassroomMembership.student_id == student_id,
+            ))
+            if membership is None:
+                raise
+            await db.refresh(classroom)
     return {"id": classroom.id, "name": classroom.name, "course_name": classroom.course_name, "joined": True}
 
 
@@ -516,7 +520,7 @@ async def create_assignment(
         status="published",
         hint_policy=hint_policy,
         transfer_question_id=transfer_question_id,
-        due_at=_parse_due_at(payload.due_at),
+        due_at=deadline_utc(payload.due_at),
     )
     db.add(assignment)
     await db.flush()
@@ -676,7 +680,7 @@ async def publish_adaptive_interventions(
             status="published",
             hint_policy=task.hint_policy,
             transfer_question_id=transfer_question_id,
-            due_at=_parse_due_at(task.due_at),
+            due_at=deadline_utc(task.due_at),
         )
         db.add(assignment)
         await db.flush()
@@ -727,7 +731,7 @@ async def my_assignments(
         item = await _assignment_payload(db, assignment, user.id)
         item["classroom_name"] = classrooms.get(assignment.classroom_id)
         attempted = await db.scalar(
-            select(func.count(func.distinct(QuestionAttempt.question_id))).where(
+                select(func.count(func.distinct(func.upper(QuestionAttempt.question_id)))).where(
                 QuestionAttempt.assignment_id == assignment.id,
                 QuestionAttempt.user_id == user.id,
             )
@@ -754,7 +758,7 @@ async def update_assignment(
     if payload.description is not None:
         assignment.description = payload.description.strip()
     if "due_at" in payload.model_fields_set:
-        assignment.due_at = _parse_due_at(payload.due_at)
+        assignment.due_at = deadline_utc(payload.due_at)
     if payload.status is not None:
         assignment.status = payload.status
     if payload.hint_policy is not None:
@@ -836,8 +840,8 @@ async def pending_reviews(classroom_id: int, user: User = Depends(get_current_us
     ).join(User, User.id == QuestionAttempt.user_id).where(
         LearningAssignment.classroom_id == classroom_id, QuestionAttempt.verdict == "needs_review"
     ).order_by(QuestionAttempt.id).limit(50))).all()
-    return [{"id": attempt.id, "student_name": name, "question_id": attempt.question_id,
-             "question": compact_question(get_question(attempt.question_id), include_answer=True),
+    return [{"id": attempt.id, "student_name": name, "question_id": attempt.question_id.upper(),
+             "question": compact_question(question, include_answer=True) if (question := get_question(attempt.question_id)) else None,
              "answer": attempt.answer_text, "reasoning": attempt.reasoning,
              "image_data_url": attempt.image_data_url, "ocr_text": attempt.ocr_text,
              "feedback": attempt.feedback} for attempt, name in rows]

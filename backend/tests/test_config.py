@@ -1,6 +1,23 @@
 import pytest
+from sqlalchemy.engine import make_url
 
 from src import config
+
+
+def test_compose_preserves_raw_database_password(monkeypatch):
+    password = "example+%/@:#?=$ password"
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("PSA_POSTGRES_HOST", "db")
+    monkeypatch.setenv("POSTGRES_USER", "teacher-app")
+    monkeypatch.setenv("POSTGRES_PASSWORD", password)
+    monkeypatch.setenv("POSTGRES_DB", "school")
+
+    url = make_url(config._database_url())
+    assert url.drivername == "postgresql+asyncpg"
+    assert url.host == "db"
+    assert url.username == "teacher-app"
+    assert url.database == "school"
+    assert url.password == password
 
 
 def test_production_rejects_default_secret(monkeypatch):

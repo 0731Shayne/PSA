@@ -79,20 +79,16 @@ async def retrieve_course_materials(
     documents = await accessible_documents(db, user, guidance_mode=guidance_mode)
     if not documents:
         return []
-    space_backends = dict(
-        (
-            await db.execute(
-                select(KnowledgeSpace.id, KnowledgeSpace.backend).where(
-                    KnowledgeSpace.id.in_({document.space_id for document in documents})
-                )
-            )
+    spaces = {
+        space.id: space for space in (
+            await db.scalars(select(KnowledgeSpace).where(
+                KnowledgeSpace.id.in_({document.space_id for document in documents})
+            ))
         ).all()
-    )
+    }
     local_documents = [
-        document for document in documents if space_backends.get(document.space_id) == "local"
-    ]
-    ragflow_documents = [
-        document for document in documents if space_backends.get(document.space_id) == "ragflow"
+        document for document in documents
+        if document.space_id in spaces and spaces[document.space_id].backend == "local"
     ]
     sources: list[dict[str, Any]] = []
     if local_documents and KNOWLEDGE_BACKEND == "local":
@@ -102,16 +98,25 @@ async def retrieve_course_materials(
             logger.warning("Local embedding retrieval unavailable: %s", exc)
         except Exception:
             logger.exception("Unexpected local knowledge retrieval failure")
-    if ragflow_documents and KNOWLEDGE_BACKEND == "ragflow":
-        names = {
-            document.provider_document_id: document.filename for document in ragflow_documents
-        }
+    if KNOWLEDGE_BACKEND == "ragflow":
+        dataset_ids: set[str] = set()
+        names: dict[str, str] = {}
+        for document in documents:
+            space = spaces.get(document.space_id)
+            if space and space.backend == "ragflow" and space.provider_dataset_id:
+                dataset_ids.add(space.provider_dataset_id)
+                names[document.provider_document_id] = document.filename
         try:
             results = await RAGFlowClient().retrieve(
                 question,
-                [document.provider_document_id for document in ragflow_documents],
+                dataset_ids=sorted(dataset_ids),
+                document_ids=list(names),
             )
-            sources.extend(_material_source(item, names) for item in results)
+            sources.extend(
+                _material_source(item, names[item.document_id])
+                for item in results
+                if item.document_id in names
+            )
         except RAGFlowError as exc:
             logger.warning("RAGFlow retrieval unavailable: %s", exc)
         except Exception:
@@ -124,10 +129,10 @@ async def retrieve_course_materials(
 
 def _material_source(
     material: RetrievedMaterial,
-    names: dict[str, str],
+    filename: str,
 ) -> dict[str, Any]:
     source = material.as_source()
-    source["document_name"] = names.get(material.document_id, material.document_name)
+    source["document_name"] = filename
     source["backend"] = "ragflow"
     return source
 

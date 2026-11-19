@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest_asyncio
@@ -50,6 +51,26 @@ async def api(tmp_path):
         yield client, create_token(teacher.id), create_token(student.id)
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+async def test_repeated_registration_and_join_handled_concurrently(api):
+    client, teacher, student = api
+    teacher_headers = {"Authorization": f"Bearer {teacher}"}
+    student_headers = {"Authorization": f"Bearer {student}"}
+    registration = {"username": "one-new-student", "password": "new-password-42"}
+    registrations = await asyncio.gather(*[
+        client.post("/api/auth/register", json=registration) for _ in range(2)
+    ])
+    assert sorted(response.status_code for response in registrations) == [200, 409]
+
+    created = await client.post("/api/classrooms", json={"name": "重复加入测试"}, headers=teacher_headers)
+    join = {"join_code": created.json()["join_code"]}
+    requests = await asyncio.gather(*[
+        client.post("/api/classrooms/join", json=join, headers=student_headers) for _ in range(2)
+    ])
+    assert [response.status_code for response in requests] == [200, 200]
+    classrooms = (await client.get("/api/classrooms", headers=teacher_headers)).json()
+    assert classrooms[0]["members"] == 1
 
 
 async def test_classroom_assignment_radar_and_intervention_loop(api, monkeypatch):

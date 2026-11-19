@@ -188,7 +188,7 @@ async def test_teacher_manages_spaces_and_student_permissions_are_fail_closed(kn
     assert {item.filename for item in full_documents} == {"概念.pdf", "解答.pdf"}
 
 
-async def test_retrieval_sends_only_authorized_document_ids(knowledge_api, monkeypatch):
+async def test_retrieval_is_scoped_to_authorized_datasets_and_documents(knowledge_api, monkeypatch):
     client = knowledge_api["client"]
     teacher_headers = knowledge_api["teacher_headers"]
     student_headers = knowledge_api["student_headers"]
@@ -211,13 +211,14 @@ async def test_retrieval_sends_only_authorized_document_ids(knowledge_api, monke
         f"/api/knowledge/spaces/{space['id']}/classrooms/{classroom['id']}",
         headers=teacher_headers,
     )
-    concept = (await _upload(client, teacher_headers, space["id"], "概念.pdf", "concept")).json()
+    await _upload(client, teacher_headers, space["id"], "概念.pdf", "concept")
     await _upload(client, teacher_headers, space["id"], "教师.pdf", "teacher_only")
     await client.post(f"/api/knowledge/spaces/{space['id']}/refresh", headers=teacher_headers)
 
     captured: list[str] = []
 
-    async def retrieve(_client, _question, document_ids):
+    async def retrieve(_client, _question, *, dataset_ids, document_ids):
+        assert dataset_ids == ["dataset-1"]
         captured.extend(document_ids)
         return [
             RetrievedMaterial(
@@ -226,7 +227,14 @@ async def test_retrieval_sends_only_authorized_document_ids(knowledge_api, monke
                 document_name="remote-name",
                 content="条件概率定义",
                 similarity=0.9,
-            )
+            ),
+            RetrievedMaterial(
+                chunk_id="unmatched-chunk",
+                document_id="unmatched-document",
+                document_name="未关联文档",
+                content="不应该返回的上游结果",
+                similarity=0.99,
+            ),
         ]
 
     monkeypatch.setattr("src.knowledge.service.KNOWLEDGE_BACKEND", "ragflow")
@@ -239,6 +247,7 @@ async def test_retrieval_sends_only_authorized_document_ids(knowledge_api, monke
             guidance_mode="hint",
         )
     assert len(captured) == 1
+    assert len(sources) == 1
     assert sources[0]["document_id"] == captured[0]
     assert sources[0]["document_name"] == "概念.pdf"
     assert all("教师" not in source["document_name"] for source in sources)

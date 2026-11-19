@@ -97,7 +97,9 @@ docker compose up --build -d
 docker compose ps
 ```
 
-浏览器访问 `http://localhost:8101`。首次启动会执行 `alembic upgrade head`，并在配置了初始教师账号时创建该账号。该账号首次登录会被强制修改初始密码，改密后其他旧会话立即失效。重复启动不会重复创建。
+在本机访问 `http://localhost:8101` 验证启动。企业环境通过同域 HTTPS 入口访问，登录 Cookie 使用 `Secure`。Docker 配置中的数据库密码填原值，含美元符号时用单引号包住整个值。直接连接外部 PostgreSQL 时，按下方示例为数据库连接地址中的密码做 URL 编码。
+
+首次启动会执行 `alembic upgrade head`，并在配置了初始教师账号时创建该账号。该账号首次登录会被强制修改初始密码，改密后其他旧会话立即失效。重复启动会复用已有账号。
 
 查看日志或停止服务：
 

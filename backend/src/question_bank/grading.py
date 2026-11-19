@@ -2,7 +2,7 @@
 import re
 from fractions import Fraction
 
-GRADING_VERSION = "diagnostic-v2"
+GRADING_VERSION = "diagnostic-v3"
 
 
 def canonical_answer(value: str) -> str:
@@ -40,3 +40,29 @@ def compare_answers(answer: str, standard: str) -> bool | None:
     if left == right:
         return True
     return None
+
+
+def _option_labels(value: str) -> set[str] | None:
+    labels = re.split(r"\s*[,，、]\s*", value.upper())
+    if len(set(labels)) != len(labels) or not all(re.fullmatch(r"[A-Z]|\(\d+\)", label) for label in labels):
+        return None
+    return set(labels)
+
+
+def compare_question_answers(answer: str, standard: str, qtype: str, choices: list[str] | None) -> bool | None:
+    left, right = canonical_answer(answer), canonical_answer(standard)
+    if qtype == "判断题":
+        judgments = {"正确": True, "成立": True, "错误": False, "不成立": False}
+        expected = re.match(r"^(?:命题)?(正确|错误|不成立|成立)(?=$|[。.!！])", right)
+        if left in judgments and expected:
+            return judgments[left] == judgments[expected[1]]
+    if qtype in {"单选题", "多选题"} and choices:
+        labels = {
+            (prefix[1] or prefix[2]).upper() for choice in choices
+            if (prefix := re.match(r"^\s*(?:(\(\d+\))|([A-Z])(?:[.．、)]|\s|$))", choice, re.I))
+        }
+        selected, expected = _option_labels(left), _option_labels(right)
+        if selected and expected and selected <= labels and expected <= labels:
+            if qtype == "多选题" or (len(selected) == 1 and len(expected) == 1):
+                return selected == expected
+    return compare_answers(answer, standard)

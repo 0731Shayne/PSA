@@ -148,16 +148,31 @@ class RAGFlowClient:
         )
 
     async def list_documents(self, dataset_id: str) -> list[dict[str, Any]]:
-        data = await self._request(
-            "GET",
-            f"/api/v1/datasets/{dataset_id}/documents",
-            params={"page": 1, "page_size": 1000, "orderby": "create_time", "desc": "true"},
-        )
-        if isinstance(data, dict):
-            docs = data.get("docs", [])
-        else:
-            docs = data or []
-        return [item for item in docs if isinstance(item, dict)]
+        documents: dict[str, dict[str, Any]] = {}
+        page = 1
+        while True:
+            data = await self._request(
+                "GET",
+                f"/api/v1/datasets/{dataset_id}/documents",
+                params={"page": page, "page_size": 1000, "orderby": "create_time", "desc": "true"},
+            )
+            docs = data.get("docs") if isinstance(data, dict) else data
+            total = data.get("total", data.get("total_datasets")) if isinstance(data, dict) else None
+            if not isinstance(docs, list):
+                raise RAGFlowError("课程资料服务返回了无效的文档列表")
+            if not docs:
+                if type(total) is int and len(documents) < total:
+                    raise RAGFlowError("课程资料服务返回的文档列表不完整，请重新同步")
+                break
+            for item in docs:
+                document_id = item.get("id") if isinstance(item, dict) else None
+                if not isinstance(document_id, str) or not document_id or document_id in documents:
+                    raise RAGFlowError("课程资料服务返回的文档列表不一致，请重新同步")
+                documents[document_id] = item
+            if type(total) is int and len(documents) >= total:
+                break
+            page += 1
+        return list(documents.values())
 
     async def delete_documents(self, dataset_id: str, document_ids: list[str]) -> None:
         await self._request(
@@ -166,11 +181,18 @@ class RAGFlowClient:
             json={"ids": document_ids},
         )
 
-    async def retrieve(self, question: str, document_ids: list[str]) -> list[RetrievedMaterial]:
-        if not document_ids:
+    async def retrieve(
+        self,
+        question: str,
+        *,
+        dataset_ids: list[str],
+        document_ids: list[str],
+    ) -> list[RetrievedMaterial]:
+        if not dataset_ids or not document_ids:
             return []
         body: dict[str, Any] = {
             "question": question,
+            "dataset_ids": dataset_ids,
             "document_ids": document_ids,
             "page": 1,
             "page_size": RAGFLOW_RETRIEVAL_PAGE_SIZE,
@@ -224,6 +246,8 @@ def normalize_document_status(value: Any) -> str:
     return {
         "0": "pending",
         "UNSTART": "pending",
+        "5": "pending",
+        "SCHEDULE": "pending",
         "1": "parsing",
         "RUNNING": "parsing",
         "2": "cancelled",
