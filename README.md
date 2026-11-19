@@ -2,6 +2,24 @@
 
 面向大学概率论与数理统计课程的题库问答与教学助手。系统由 React、FastAPI 和 SQLAlchemy 构建，开发环境可使用 SQLite，正式部署使用 PostgreSQL。
 
+[在线演示](https://0731shayne.github.io/PSA/) · [部署说明](#公司接手需要准备什么)
+
+## 界面预览
+
+点击截图可查看大图。
+
+| 教师工作台 | 班级认知雷达 |
+| --- | --- |
+| [![教师工作台展示班级待办和任务进度](docs/screenshots/teacher-dashboard.png)](docs/screenshots/teacher-dashboard.png) | [![班级认知雷达展示知识点风险和建议干预分组](docs/screenshots/classroom-radar.png)](docs/screenshots/classroom-radar.png) |
+
+| 学生任务 | 个性化学习路径 |
+| --- | --- |
+| [![学生任务列表展示待完成任务与完成进度](docs/screenshots/student-tasks.png)](docs/screenshots/student-tasks.png) | [![学生学习路径展示下一步任务和知识点预警](docs/screenshots/learning-path.png)](docs/screenshots/learning-path.png) |
+
+| 智能答疑 | 概率统计题库 |
+| --- | --- |
+| [![智能答疑展示辅导方式与条件概率练习讲解](docs/screenshots/ai-tutor.png)](docs/screenshots/ai-tutor.png) | [![概率统计题库展示公式、题目和筛选选项](docs/screenshots/question-bank.png)](docs/screenshots/question-bank.png) |
+
 ## 当前能力
 
 - 学生端：四种辅导方式、流式答疑、多方式作答诊断、知识点掌握度、认知断层预警和个性化学习路径
